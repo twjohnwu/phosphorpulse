@@ -47,31 +47,36 @@ fn color(hex: &str, d: &str, bg: bool) -> String {
         }
     }
 }
-fn wrap(id: &str, s: Segment, cfg: &Value, t: &Theme, d: &str) -> String {
-    let rowfg = cfg
+fn configured_color<'a>(id: &str, row: Option<&'a Value>, cfg: &'a Value, key: &str) -> Option<&'a str> {
+    cfg
         .get("segments")
         .and_then(|v| v.get(id))
-        .and_then(|v| v.get("fg"))
+        .and_then(|v| v.get(key))
         .and_then(Value::as_str)
-        .or_else(|| s.fg)
-        .unwrap_or("");
-    let key = if rowfg.starts_with('#') {
-        rowfg
+        .or_else(|| row.and_then(|value| value.get("color"))
+            .and_then(|value| value.get(key)).and_then(Value::as_str))
+}
+fn palette_color<'a>(value: &'a str, t: &'a Theme) -> &'a str {
+    if value.starts_with('#') {
+        value
     } else {
-        t.palette.get(rowfg).map(String::as_str).unwrap_or(rowfg)
-    };
+        t.palette.get(value).map(String::as_str).unwrap_or(value)
+    }
+}
+fn wrap(id: &str, s: Segment, row: Option<&Value>, cfg: &Value, t: &Theme, d: &str) -> String {
+    let fg = configured_color(id, row, cfg, "fg").or(s.fg);
+    let bg = configured_color(id, row, cfg, "bg");
     let text = s
         .text
         .replace(DIM, &color(t.palette.get("text.dim").unwrap(), d, false));
-    if key.is_empty() {
+    if fg.is_none() && bg.is_none() && !s.bold {
         text
     } else {
-        format!(
-            "{}{}{}\x1b[0m",
-            if s.bold { "\x1b[1m" } else { "" },
-            color(key, d, false),
-            text
-        )
+        let mut prefix = String::new();
+        if s.bold { prefix.push_str("\x1b[1m"); }
+        if let Some(fg) = fg { prefix.push_str(&color(palette_color(fg, t), d, false)); }
+        if let Some(bg) = bg { prefix.push_str(&color(palette_color(bg, t), d, true)); }
+        format!("{prefix}{text}\x1b[0m")
     }
 }
 fn segment(
@@ -128,7 +133,13 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
-    let external = external::resolve(&config_dir, c.cwd.as_deref(), true, true, true);
+    let configured_ids = cfg.get("rows").and_then(Value::as_array).into_iter().flatten()
+        .filter_map(|row| row.get("segments").and_then(Value::as_array))
+        .flatten().filter_map(Value::as_str);
+    let (need_git, need_node, need_python) = configured_ids.fold((false, false, false), |needs, id| {
+        (needs.0 || id == "git", needs.1 || id == "node", needs.2 || id == "python")
+    });
+    let external = external::resolve(&config_dir, c.cwd.as_deref(), need_git, need_node, need_python);
     let needs_pomodoro = cfg
         .get("rows")
         .and_then(Value::as_array)
@@ -176,7 +187,7 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
                         Some(row_builder::FLEX.into())
                     } else {
                         segment(id, &c, &external, pomodoro.as_ref())
-                            .map(|s| wrap(id, s, &cfg, &template, d))
+                            .map(|s| wrap(id, s, row, &cfg, &template, d))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -236,7 +247,7 @@ pub fn render_subagent(raw: Value) {
             };
             if let Some((text, key, bold)) = rendered {
                 let s = Segment { text, fg: Some(key), bold };
-                parts.push(wrap(id, s, &cfg, &t, d));
+                parts.push(wrap(id, s, None, &cfg, &t, d));
             }
         }
         let content = parts.into_iter().map(|part| format!(" {part} ")).collect::<String>();

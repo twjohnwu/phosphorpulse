@@ -39,6 +39,11 @@ impl Config {
         if rows.len() > 3 {
             return Err("/rows: must have at most 3 item(s)".into());
         }
+        if let Some(bar_width) = self.0.get("gauge").and_then(|gauge| gauge.get("barWidth")) {
+            if !matches!(bar_width.as_f64(), Some(width) if width.fract() == 0.0 && (1.0..=80.0).contains(&width)) {
+                return Err("/gauge/barWidth: must be an integer between 1 and 80".into());
+            }
+        }
         for (index, row) in rows.iter().enumerate() {
             let row = row
                 .as_object()
