@@ -161,6 +161,30 @@ fn test_invalid_color_fail_safe() {
 }
 
 #[test]
+fn test_row_color_invalid_fail_safe() {
+    for value in ["red", "#f"] {
+        let temp = TempDir::new("invalid-row-color");
+        let config_dir = temp.path().join("config");
+        write_settings(&config_dir, serde_json::json!({
+            "rows": [{"color": {"fg": value}, "segments": ["model"]}]
+        }));
+
+        let output = render(&config_dir, &stdin(), |command| {
+            command.env("COLORTERM", "truecolor");
+        });
+        assert!(output.status.success(), "invalid row color config must exit 0: {output:?}");
+        let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+
+        // Match segment-level overrides: frozen TS rejects both values during
+        // validation and emits one fail-loud config-invalid warning.
+        assert!(stdout.contains("warning") && stdout.contains("config invalid"),
+            "invalid row color must fail loud: {stdout:?}");
+        assert_eq!(stdout.lines().count(), 1, "invalid row color must only warn: {stdout:?}");
+        assert!(!stdout.contains("\x1b["), "invalid row color must not render ANSI: {stdout:?}");
+    }
+}
+
+#[test]
 fn test_timeout_kill_is_cross_platform() {
     let implementation = fs::read_to_string("src/segments/external.rs")
         .expect("read external segment implementation");

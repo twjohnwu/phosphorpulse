@@ -73,6 +73,20 @@ impl Config {
                     ));
                 }
             }
+            if let Some(color) = row.get("color") {
+                let color = color
+                    .as_object()
+                    .ok_or_else(|| format!("/rows/{index}/color: must be an object"))?;
+                for key in ["fg", "bg"] {
+                    if let Some(value) = color.get(key) {
+                        if !matches!(value.as_str(), Some(value) if is_six_digit_hex(value)) {
+                            return Err(format!(
+                                "/rows/{index}/color/{key}: must match pattern ^#[0-9A-Fa-f]{{6}}$"
+                            ));
+                        }
+                    }
+                }
+            }
             if let Some(segments) = row.get("segments") {
                 let segments = segments
                     .as_array()
