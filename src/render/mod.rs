@@ -133,55 +133,34 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
-    let configured_ids = cfg.get("rows").and_then(Value::as_array).into_iter().flatten()
-        .filter_map(|row| row.get("segments").and_then(Value::as_array))
-        .flatten().filter_map(Value::as_str);
-    let (need_git, need_node, need_python) = configured_ids.fold((false, false, false), |needs, id| {
-        (needs.0 || id == "git", needs.1 || id == "node", needs.2 || id == "python")
-    });
-    let external = external::resolve(&config_dir, c.cwd.as_deref(), need_git, need_node, need_python);
-    let needs_pomodoro = cfg
+    let count = cfg
         .get("rows")
         .and_then(Value::as_array)
-        .is_some_and(|rows| {
-            rows.iter().any(|row| {
-                row.get("segments")
-                    .and_then(Value::as_array)
-                    .is_some_and(|segments| {
-                        segments.iter().any(|id| id.as_str() == Some("pomodoro"))
-                    })
-            })
-        });
+        .map(|x| x.len())
+        .unwrap_or(template.rows.len());
+    let row_segments = (0..count)
+        .map(|index| resolved_row_segments(&cfg, &template, index))
+        .collect::<Vec<_>>();
+    let (need_git, need_node, need_python) = row_segments.iter().flatten().fold((false, false, false), |needs, id| {
+        (needs.0 || *id == "git", needs.1 || *id == "node", needs.2 || *id == "python")
+    });
+    let external = external::resolve(&config_dir, c.cwd.as_deref(), need_git, need_node, need_python);
+    let needs_pomodoro = row_segments.iter().flatten().any(|id| *id == "pomodoro");
     let pomodoro = needs_pomodoro.then(|| pomodoro::resolve(&c, &cfg, &config_dir));
     let cols = std::env::var("COLUMNS")
         .ok()
         .and_then(|x| x.parse::<usize>().ok().filter(|x| *x > 0).map(|x| x.saturating_sub(4).max(20)))
         .unwrap_or(80);
     let d = depth(&cfg);
-    let count = cfg
-        .get("rows")
-        .and_then(Value::as_array)
-        .map(|x| x.len())
-        .unwrap_or(template.rows.len());
     (0..count)
         .map(|i| {
             let row = cfg
                 .get("rows")
                 .and_then(Value::as_array)
                 .and_then(|x| x.get(i));
-            let ids = row
-                .and_then(|r| r.get("segments"))
-                .and_then(Value::as_array)
-                .map(|x| x.iter().filter_map(Value::as_str).collect::<Vec<_>>())
-                .unwrap_or_else(|| {
-                    template
-                        .rows
-                        .get(i)
-                        .map(|x| x.segments.iter().map(String::as_str).collect())
-                        .unwrap_or_default()
-                });
-            let out = ids
-                .into_iter()
+            let out = row_segments[i]
+                .iter()
+                .copied()
                 .filter_map(|id| {
                     if id == "flex" {
                         Some(row_builder::FLEX.into())
@@ -203,6 +182,22 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n"
+}
+
+fn resolved_row_segments<'a>(cfg: &'a Value, template: &'a themes::Theme, index: usize) -> Vec<&'a str> {
+    cfg.get("rows")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.get(index))
+        .and_then(|row| row.get("segments"))
+        .and_then(Value::as_array)
+        .map(|segments| segments.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_else(|| {
+            template
+                .rows
+                .get(index)
+                .map(|row| row.segments.iter().map(String::as_str).collect())
+                .unwrap_or_default()
+        })
 }
 pub fn render(raw: Value) {
     match config::load() {

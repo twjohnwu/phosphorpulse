@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     sync::{mpsc, Arc, Mutex, OnceLock},
@@ -110,6 +111,32 @@ fn command_with_timeout(
         Ok(child) => Arc::new(Mutex::new(Some(child))),
         Err(_) => return CommandResult::Failed,
     };
+    let stdout = child
+        .lock()
+        .expect("child handle poisoned")
+        .as_mut()
+        .expect("child handle missing")
+        .stdout
+        .take()
+        .expect("piped stdout missing");
+    let stderr = child
+        .lock()
+        .expect("child handle poisoned")
+        .as_mut()
+        .expect("child handle missing")
+        .stderr
+        .take()
+        .expect("piped stderr missing");
+    let stdout_reader = thread::spawn(move || {
+        let mut reader = stdout;
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output).map(|_| output)
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut reader = stderr;
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output).map(|_| output)
+    });
     let worker_child = Arc::clone(&child);
     let worker = thread::spawn(move || {
         let output = loop {
@@ -119,12 +146,23 @@ fn command_with_timeout(
             };
             match exited {
                 Ok(Some(_)) => {
-                    let child = worker_child
+                    let mut child = worker_child
                         .lock()
                         .expect("child handle poisoned")
                         .take()
                         .expect("child handle missing");
-                    break child.wait_with_output();
+                    let status = child.wait();
+                    let stdout = stdout_reader.join().map_err(|_| {
+                        std::io::Error::new(std::io::ErrorKind::Other, "stdout reader panicked")
+                    });
+                    let stderr = stderr_reader.join().map_err(|_| {
+                        std::io::Error::new(std::io::ErrorKind::Other, "stderr reader panicked")
+                    });
+                    break match (status, stdout, stderr) {
+                        (Ok(status), Ok(Ok(stdout)), Ok(Ok(stderr))) => Ok(Output { status, stdout, stderr }),
+                        (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => Err(error),
+                        (_, Ok(Err(error)), _) | (_, _, Ok(Err(error))) => Err(error),
+                    };
                 }
                 Ok(None) => thread::sleep(Duration::from_millis(1)),
                 Err(error) => break Err(error),

@@ -193,3 +193,78 @@ fn test_timeout_kill_is_cross_platform() {
     assert!(!implementation.contains("/bin/kill"),
         "timeout must not shell out to a platform-specific killer");
 }
+
+fn input_with_cwd(cwd: &Path) -> Vec<u8> {
+    let mut input: serde_json::Value = serde_json::from_slice(&stdin()).expect("parse render stdin");
+    input["cwd"] = serde_json::json!(cwd);
+    serde_json::to_vec(&input).expect("serialize render stdin")
+}
+
+fn write_lookup_stub(path: &Path, body: &str) {
+    fs::write(
+        path,
+        format!("#!/bin/sh\nprintf '%s\\n' '{}' >> \"$PPULSE_LOOKUP_COUNTER\"\n{body}\n", path.file_name().expect("stub name").to_string_lossy()),
+    )
+    .expect("write lookup stub");
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(path).expect("stub metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).expect("make stub executable");
+    }
+}
+
+#[test]
+fn test_fallback_row_segments_resolve_lookups() {
+    let temp = TempDir::new("fallback-lookups");
+    let config_dir = temp.path().join("config");
+    let stub_bin = temp.path().join("bin");
+    let counter = temp.path().join("counter");
+    fs::create_dir_all(&stub_bin).expect("create stub bin");
+    write_settings(&config_dir, serde_json::json!({
+        "colorDepth": "truecolor",
+        "rows": [{"layout": "auto", "color": {"fg": "#00FF00"}}, {"layout": "auto"}]
+    }));
+    write_lookup_stub(&stub_bin.join("git"), "printf '## fallback-branch...origin/fallback-branch\\n'");
+    write_lookup_stub(&stub_bin.join("node"), "printf 'v99.1.0\\n'");
+    write_lookup_stub(&stub_bin.join("python3"), "printf 'Python 88.2.0\\n'");
+    let warm_counter = temp.path().join("warm-counter");
+    for name in ["git", "node", "python3"] {
+        assert!(Command::new(stub_bin.join(name)).env("PPULSE_LOOKUP_COUNTER", &warm_counter)
+            .stdout(Stdio::null()).status().expect("warm stub").success());
+    }
+    let path = format!("{}:{}", stub_bin.display(), std::env::var("PATH").expect("PATH set"));
+    let output = render(&config_dir, &input_with_cwd(temp.path()), |command| {
+        command.env("PATH", path).env("PPULSE_LOOKUP_COUNTER", &counter);
+    });
+    assert!(output.status.success(), "fallback render failed: {:?}", output.stderr);
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    let invoked = fs::read_to_string(&counter).unwrap_or_default();
+    assert!(invoked.contains("git") && invoked.contains("node"),
+        "fallback template segments must invoke their lookups: {invoked:?}");
+    assert!(stdout.contains("fallback-branch"), "git fallback segment missing: {stdout:?}");
+    assert!(!stdout.contains("git:—"), "git must not be unavailable: {stdout:?}");
+}
+
+#[test]
+fn test_large_git_output_no_false_timeout() {
+    let temp = TempDir::new("large-git-output");
+    let config_dir = temp.path().join("config");
+    let stub_bin = temp.path().join("bin");
+    let counter = temp.path().join("counter");
+    fs::create_dir_all(&stub_bin).expect("create stub bin");
+    write_settings(&config_dir, serde_json::json!({"rows": [{"segments": ["git"]}]}));
+    write_lookup_stub(&stub_bin.join("git"), "printf '## main...origin/main\\n'; yes ' M file' | head -c 262144");
+    let warm_counter = temp.path().join("warm-counter");
+    assert!(Command::new(stub_bin.join("git")).env("PPULSE_LOOKUP_COUNTER", &warm_counter)
+        .stdout(Stdio::null()).status().expect("warm stub").success());
+    let path = format!("{}:{}", stub_bin.display(), std::env::var("PATH").expect("PATH set"));
+    let output = render(&config_dir, &input_with_cwd(temp.path()), |command| {
+        command.env("PATH", path).env("PPULSE_LOOKUP_COUNTER", &counter);
+    });
+    assert!(output.status.success(), "large-output render failed: {:?}", output.stderr);
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    assert!(fs::read_to_string(&counter).unwrap_or_default().contains("git"), "git stub was not invoked");
+    assert!(stdout.contains("main*"), "large git output must retain branch and dirty marker: {stdout:?}");
+    assert!(!stdout.contains("git:—"), "large git output must not time out: {stdout:?}");
+}
