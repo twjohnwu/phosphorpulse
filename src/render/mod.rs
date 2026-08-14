@@ -4,7 +4,7 @@ use crate::{
     config,
     protocol::RenderContext,
     segments::{
-        external,
+        external, pomodoro,
         simple::{self, Segment, DIM},
     },
 };
@@ -74,7 +74,12 @@ fn wrap(id: &str, s: Segment, cfg: &Value, t: &Theme, d: &str) -> String {
         )
     }
 }
-fn segment(id: &str, c: &RenderContext, e: &external::Values) -> Option<Segment> {
+fn segment(
+    id: &str,
+    c: &RenderContext,
+    e: &external::Values,
+    pomodoro: Option<&pomodoro::Pomodoro>,
+) -> Option<Segment> {
     match id {
         "model" => simple::model(c),
         "effort" => simple::effort(c),
@@ -86,14 +91,14 @@ fn segment(id: &str, c: &RenderContext, e: &external::Values) -> Option<Segment>
         "cost" => simple::cost(c),
         "burn" => simple::burn(c),
         "git" => e.git.as_ref().map(|x| Segment {
-                text: format!("⎇ {x}"),
-                fg: Some(if x.contains('*') {
-                    "git.dirty"
-                } else {
-                    "git.ok"
-                }),
-                bold: false,
+            text: format!("⎇ {x}"),
+            fg: Some(if x.contains('*') {
+                "git.dirty"
+            } else {
+                "git.ok"
             }),
+            bold: false,
+        }),
         "node" => Some(Segment {
             text: e.node.clone().unwrap_or_else(|| "node:—".into()),
             fg: Some("node"),
@@ -104,9 +109,9 @@ fn segment(id: &str, c: &RenderContext, e: &external::Values) -> Option<Segment>
             fg: Some("python"),
             bold: false,
         }),
-        "pomodoro" => Some(Segment {
-            text: "⏱ --:--".into(),
-            fg: Some("clock"),
+        "pomodoro" => pomodoro.map(|value| Segment {
+            text: value.text.clone(),
+            fg: Some(value.fg),
             bold: false,
         }),
         _ => None,
@@ -124,6 +129,19 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
     let external = external::resolve(&config_dir, c.cwd.as_deref(), true, true, true);
+    let needs_pomodoro = cfg
+        .get("rows")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row.get("segments")
+                    .and_then(Value::as_array)
+                    .is_some_and(|segments| {
+                        segments.iter().any(|id| id.as_str() == Some("pomodoro"))
+                    })
+            })
+        });
+    let pomodoro = needs_pomodoro.then(|| pomodoro::resolve(&c, &cfg, &config_dir));
     let cols = std::env::var("COLUMNS")
         .ok()
         .and_then(|x| x.parse().ok())
@@ -157,7 +175,8 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
                     if id == "flex" {
                         Some(row_builder::FLEX.into())
                     } else {
-                        segment(id, &c, &external).map(|s| wrap(id, s, &cfg, &template, d))
+                        segment(id, &c, &external, pomodoro.as_ref())
+                            .map(|s| wrap(id, s, &cfg, &template, d))
                     }
                 })
                 .collect::<Vec<_>>();
