@@ -16,7 +16,30 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         .unwrap_or("state");
     let temporary = parent.join(format!("{name}.tmp-{}", std::process::id()));
     fs::write(&temporary, contents)?;
+    replace_file(&temporary, path)
+}
+
+#[cfg(not(windows))]
+fn replace_file(temporary: &Path, path: &Path) -> io::Result<()> {
     fs::rename(temporary, path)
+}
+
+#[cfg(windows)]
+fn replace_file(temporary: &Path, path: &Path) -> io::Result<()> {
+    match fs::rename(temporary, path) {
+        Ok(()) => Ok(()),
+        // Windows' MoveFile-based rename does not replace an existing destination.
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            fs::remove_file(path)?;
+            fs::rename(temporary, path)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Best-effort hygiene for interrupted atomic writes.  Failure to inspect or

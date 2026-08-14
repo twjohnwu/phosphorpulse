@@ -290,10 +290,10 @@ pub fn resolve(
     let cwd_key = cwd.unwrap_or("").to_owned();
     let node_pinned = need_node.then(|| node_pin(cwd)).flatten();
     let python_pinned = need_python.then(|| python_pin(cwd)).flatten();
-    let cache = if need_git
+    let cache_loaded = need_git
         || (need_node && node_pinned.is_none())
-        || (need_python && python_pinned.is_none())
-    {
+        || (need_python && python_pinned.is_none());
+    let cache = if cache_loaded {
         lookup_cache::read(directory)
     } else {
         Cache::default()
@@ -322,6 +322,7 @@ pub fn resolve(
         python: python_pinned.or(python_cached),
     };
     let mut updated = cache;
+    let mut cache_changed = false;
     for job in jobs {
         let (kind, value) = job.join().unwrap_or(("", String::new()));
         if value.is_empty() {
@@ -331,6 +332,7 @@ pub fn resolve(
             "git" => {
                 values.git = Some(value.clone());
                 if value != GIT_FALLBACK {
+                    cache_changed = true;
                     updated.git.insert(
                         cwd_key.clone(),
                         Entry {
@@ -343,6 +345,7 @@ pub fn resolve(
             "node" => {
                 values.node = Some(value.clone());
                 if value != NODE_FALLBACK {
+                    cache_changed = true;
                     updated.node = Some(Entry {
                         value,
                         fetched_at: now,
@@ -352,6 +355,7 @@ pub fn resolve(
             "python" => {
                 values.python = Some(value.clone());
                 if value != PYTHON_FALLBACK {
+                    cache_changed = true;
                     updated.python = Some(Entry {
                         value,
                         fetched_at: now,
@@ -361,10 +365,7 @@ pub fn resolve(
             _ => {}
         }
     }
-    if need_git && values.git.is_some()
-        || need_node && values.node.is_some()
-        || need_python && values.python.is_some()
-    {
+    if cache_loaded && cache_changed {
         lookup_cache::write(directory, updated, now);
     }
     values
