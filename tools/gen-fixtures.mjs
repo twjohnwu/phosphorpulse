@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const reference = "/Users/sinbaji/Desktop/FullStack/sideProjects/phosphorflux";
+const reference = process.env.PPULSE_REFERENCE_DIR ?? resolve(root, "..", "phosphorflux");
 const outDir = join(root, "tests", "fixtures");
 const widthInputs = ["", "A", "hello", "中", "中文", "台灣", "🇹🇼", "❤️", "♥", "👨‍👩‍👧‍👦", "👩‍💻", "😀", "a中b", "ＡＢＣ", "AＡ中", "é", "न", "한글", "￥", "ｶ", "\u001b[31mred\u001b[0m", "x\u001b[1;34my\u001b[0mz", "\n", "\t", "©", "™️", "🏳️‍🌈", "👨‍👩‍👧‍👦中", "🇹🇼❤️", "abc中def", "𠀀", "·"];
 const paletteInputs = ["#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff", "#808080", "#c0c0c0", "#121612", "#0e120e", "#0a0e0a", "#00cf41", "#00cdcd", "#00ffff", "#969696", "#008f11", "#00e5ff", "#ffd700", "#ff7f50", "#ff3737", "#268bd2", "#2aa198", "#b58900", "#93a1a1", "#586e75", "#859900", "#073642", "#657b83", "#cb4b16", "#6c71c4", "#839496", "#eee8d5", "#dc322f", "#123456", "#abcdef", "#fedcba", "#102030", "#fefefe", "#010203", "#7f3f00", "#3f7fff", "#cc44aa"];

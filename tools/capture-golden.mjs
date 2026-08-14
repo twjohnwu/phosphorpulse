@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const reference = "/Users/sinbaji/Desktop/FullStack/sideProjects/phosphorflux";
+const reference = process.env.PPULSE_REFERENCE_DIR ?? resolve(root, "..", "phosphorflux");
 const freezeNow = join(root, "tools", "freeze-now.mjs");
 
 function fail(message) {
