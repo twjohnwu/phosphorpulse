@@ -1,1 +1,69 @@
-pub struct Config;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+/// The configuration document.  Keeping its schema open lets this loader
+/// remain no stricter than the TS lite validator as fields are added there.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct Config(pub Map<String, Value>);
+
+impl Config {
+    pub fn defaults() -> Self {
+        let mut values = Map::new();
+        values.insert("style".into(), Value::String("lean".into()));
+        values.insert("activeTemplate".into(), Value::String("matrix-tron".into()));
+        values.insert("colorDepth".into(), Value::String("auto".into()));
+        values.insert(
+            "rows".into(),
+            serde_json::json!([{"layout": "auto", "segments": ["model", "ctx"]}]),
+        );
+        values.insert(
+            "subagent".into(),
+            serde_json::json!({"segments": ["name", "model", "ctx", "elapsed"]}),
+        );
+        values.insert(
+            "gauge".into(),
+            serde_json::json!({"barWidth": 20, "warnPct": 65, "hotPct": 85}),
+        );
+        Self(values)
+    }
+
+    /// TS liteValidate permits omitted properties, but the renderer dereferences
+    /// rows.  This is the approved fail-loud exception to that permissiveness.
+    pub fn validate_renderable(&self) -> Result<(), String> {
+        let rows = self.0.get("rows").ok_or("/rows: required for rendering")?;
+        let rows = rows.as_array().ok_or("/rows: must be an array")?;
+        if rows.is_empty() {
+            return Err("/rows: must have at least 1 item(s)".into());
+        }
+        if rows.len() > 3 {
+            return Err("/rows: must have at most 3 item(s)".into());
+        }
+        for (index, row) in rows.iter().enumerate() {
+            let row = row
+                .as_object()
+                .ok_or_else(|| format!("/rows/{index}: must be an object"))?;
+            if let Some(layout) = row.get("layout") {
+                if !matches!(layout.as_str(), Some("auto" | "fixed")) {
+                    return Err(format!(
+                        "/rows/{index}/layout: must be one of \"auto\", \"fixed\""
+                    ));
+                }
+            }
+            if let Some(segments) = row.get("segments") {
+                let segments = segments
+                    .as_array()
+                    .ok_or_else(|| format!("/rows/{index}/segments: must be an array"))?;
+                if segments
+                    .iter()
+                    .any(|segment| !matches!(segment, Value::String(s) if !s.is_empty()))
+                {
+                    return Err(format!(
+                        "/rows/{index}/segments: entries must be non-empty strings"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}

@@ -114,6 +114,8 @@ fn test_s02_config_resolution_and_fallback() {
         .env("PPULSE_CONFIG_DIR", &invalid_config_dir)
         .env_remove("PPF_CONFIG_DIR")
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("start phosphorpulse render");
     let mut render_child = render_output;
@@ -146,6 +148,8 @@ fn test_s02_config_resolution_and_fallback() {
         .env("PPULSE_CONFIG_DIR", &invalid_config_dir)
         .env_remove("PPF_CONFIG_DIR")
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("start phosphorpulse render --subagent");
     subagent_child
