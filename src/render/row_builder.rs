@@ -1,4 +1,5 @@
 use crate::jsx::width::display_width;
+use unicode_segmentation::UnicodeSegmentation;
 pub const FLEX: &str = "\0FLEX\0";
 pub fn build_row(segments: &[String], layout: &str, width: usize, sep: &str) -> String {
     let width = if width == 0 { 80 } else { width };
@@ -13,17 +14,7 @@ pub fn build_row(segments: &[String], layout: &str, width: usize, sep: &str) -> 
         })
         .collect();
     if layout == "fixed" {
-        let mut o = String::new();
-        for (i, s) in p.iter().enumerate() {
-            if i > 0 {
-                o += sep
-            }
-            o += s;
-            if display_width(&o) >= width {
-                break;
-            }
-        }
-        return o;
+        return truncate_to_width(&p.join(sep), width);
     }
     let mut kept = Vec::new();
     let mut used = 0;
@@ -56,4 +47,30 @@ pub fn build_row(segments: &[String], layout: &str, width: usize, sep: &str) -> 
             }
         })
         .collect()
+}
+
+fn truncate_to_width(input: &str, width: usize) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::new();
+    let mut used = 0;
+    let mut index = 0;
+    let mut style_open = false;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"\x1b[") {
+            let mut end = index + 2;
+            while end < bytes.len() && (bytes[end].is_ascii_digit() || bytes[end] == b';') { end += 1; }
+            if end < bytes.len() && bytes[end] == b'm' {
+                let seq = &input[index..=end]; out.push_str(seq);
+                style_open = seq != "\x1b[0m";
+                index = end + 1; continue;
+            }
+        }
+        let tail = &input[index..];
+        let cluster = tail.graphemes(true).next().expect("nonempty grapheme");
+        let w = display_width(cluster);
+        if used + w > width { break; }
+        out.push_str(cluster); used += w; index += cluster.len();
+    }
+    if style_open { out.push_str("\x1b[0m"); }
+    out
 }

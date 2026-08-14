@@ -144,7 +144,7 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
     let pomodoro = needs_pomodoro.then(|| pomodoro::resolve(&c, &cfg, &config_dir));
     let cols = std::env::var("COLUMNS")
         .ok()
-        .and_then(|x| x.parse().ok())
+        .and_then(|x| x.parse::<usize>().ok().filter(|x| *x > 0).map(|x| x.saturating_sub(4).max(20)))
         .unwrap_or(80);
     let d = depth(&cfg);
     let count = cfg
@@ -209,32 +209,66 @@ pub fn render_subagent(raw: Value) {
             .and_then(Value::as_str)
             .unwrap_or("matrix-tron"),
     );
+    let c = RenderContext::from_value(&raw, Some(&cfg));
     let tasks = raw.get("tasks").and_then(Value::as_array);
     if tasks.is_none() {
         println!("phosphorpulse subagent");
         return;
     }
+    let ids = cfg.get("subagent").and_then(|v| v.get("segments")).and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+        .unwrap_or_else(|| t.subagent.iter().map(String::as_str).collect());
     for task in tasks.into_iter().flatten().take(20) {
-        let name = task
-            .get("name")
-            .or_else(|| task.get("description"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let model = task
-            .get("model")
-            .and_then(Value::as_str)
-            .map(|x| format!("◆ {x}"))
-            .unwrap_or_default();
-        let content = format!(
-            " {}{}\x1b[0m  {}{}\x1b[0m ",
-            color(t.palette.get("sub.name").unwrap(), d, false),
-            name,
-            color(t.palette.get("sub.model").unwrap(), d, false),
-            model
-        );
-        println!(
-            "{}",
-            serde_json::json!({"id":task.get("id").cloned().unwrap_or(Value::Null),"content":content})
-        );
+        let detail = task.get("description").or_else(|| task.get("label")).and_then(Value::as_str);
+        let identity = task.get("name").and_then(Value::as_str);
+        let name = identity.or(detail);
+        let mut parts = Vec::new();
+        for id in &ids {
+            let rendered = match *id {
+                "name" => name.map(|x| (x.to_owned(), "sub.name", true)),
+                "desc" if identity.is_some() => detail.map(|x| (x.to_owned(), "text.dim", false)),
+                "model" => task.get("model").and_then(Value::as_str).map(|x| (format!("◆ {}", model_short(x)), "sub.model", true)),
+                "effort" => task.get("effort").and_then(Value::as_str).map(|x| (format!("ψ {}", if x == "medium" { "med" } else { x }), "effort", false)),
+                "ctx" => subagent_ctx(task, &c),
+                "elapsed" => subagent_elapsed(task),
+                "tokenCount" => task.get("tokenCount").and_then(num_value).map(|x| (simple::tokens(x), "text.dim", false)),
+                _ => None,
+            };
+            if let Some((text, key, bold)) = rendered {
+                let s = Segment { text, fg: Some(key), bold };
+                parts.push(wrap(id, s, &cfg, &t, d));
+            }
+        }
+        let content = parts.into_iter().map(|part| format!(" {part} ")).collect::<String>();
+        let id = serde_json::to_string(task.get("id").unwrap_or(&Value::Null)).expect("serialize task id");
+        let content = serde_json::to_string(&content).expect("serialize task content");
+        println!("{{\"id\":{id},\"content\":{content}}}");
     }
 }
+
+fn num_value(v: &Value) -> Option<f64> { match v { Value::Number(n) => n.as_f64().filter(|x| x.is_finite()), _ => None } }
+fn model_short(model: &str) -> String {
+ let s = model.strip_prefix("claude-").unwrap_or(model);
+ s.split('-').map(|part| if part.chars().all(|c| c.is_ascii_digit()) { part.to_owned() } else {
+  let mut chars=part.chars(); chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+ }).collect::<Vec<_>>().join(" ")
+}
+fn subagent_ctx(task: &Value, c: &RenderContext) -> Option<(String, &'static str, bool)> {
+ let tokens = task.get("tokenCount").and_then(num_value)?;
+ let token_text = simple::tokens(tokens);
+ if let Some(window) = task.get("contextWindowSize").and_then(num_value).filter(|x| *x > 0.) {
+  let pct = ((tokens * 100. / window).floor()).min(100.);
+  let fg = if pct >= c.hot_pct { "hot" } else if pct >= c.warn_pct { "warn" } else { "ok" };
+  return Some((format!("⬡ {} {}% {DIM}{token_text}", gauge(pct, c.gauge_width), pct as i64), fg, false));
+ }
+ Some((format!("⬡ {token_text}"), "text.dim", false))
+}
+fn subagent_elapsed(task: &Value) -> Option<(String, &'static str, bool)> {
+ let start = task.get("startTime").and_then(num_value)? as i64;
+ let diff = crate::clock::now_ms() - start;
+ if diff < 0 { return None; }
+ let seconds = diff / 1000; let h=seconds/3600; let m=(seconds%3600)/60; let s=seconds%60;
+ let text = if h > 0 { format!("⧖ {h}h{m:02}m{s:02}s") } else if m > 0 { format!("⧖ {m}m{s:02}s") } else { format!("⧖ {s}s") };
+ Some((text, "sub.elapsed", false))
+}
+fn gauge(p:f64,w:usize)->String { let n=(p.clamp(0.,100.)*w as f64/100.).round() as usize; format!("{}{}", "▰".repeat(n), "▱".repeat(w.saturating_sub(n))) }

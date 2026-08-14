@@ -13,7 +13,32 @@ pub struct RenderContext {
     pub gauge_width: usize, pub warn_pct: f64, pub hot_pct: f64,
 }
 fn num(v: Option<&Value>) -> Option<f64> { match v? { Value::Number(n) => n.as_f64().filter(|x| x.is_finite()), Value::String(s) if !s.is_empty() => s.parse().ok().filter(|x: &f64| x.is_finite()), _ => None } }
-fn reset(v: Option<&Value>) -> Option<i64> { let value=v?; match value { Value::Number(_) => num(Some(value)).map(|x| (x * 1000.0) as i64), Value::String(s) if !s.is_empty() => s.parse::<i64>().ok(), _ => None } }
+fn reset(v: Option<&Value>) -> Option<i64> {
+ let value=v?;
+ match value {
+  Value::Number(_) => num(Some(value)).map(|x| (x * 1000.0) as i64),
+  // Claude Code has emitted both epoch seconds and ISO-8601 strings.
+  Value::String(s) if !s.is_empty() => s.parse::<i64>().ok().map(|x| x * 1000).or_else(|| parse_iso_millis(s)),
+  _ => None,
+ }
+}
+// Date.parse-compatible enough for the ISO timestamps emitted by Claude Code.
+fn parse_iso_millis(s: &str) -> Option<i64> {
+ let (date, time) = s.split_once('T')?;
+ let mut ds=date.split('-').map(str::parse::<i64>); let (y,mo,d)=(ds.next()?.ok()?,ds.next()?.ok()?,ds.next()?.ok()?);
+ if !(1..=12).contains(&mo) { return None; }
+ let zone_at=time.find(|c| c == 'Z' || c == '+' || c == '-').unwrap_or(time.len());
+ let clock=&time[..zone_at]; let zone=&time[zone_at..]; let mut ts=clock.split(':');
+ let h=ts.next()?.parse::<i64>().ok()?; let mi=ts.next()?.parse::<i64>().ok()?;
+ let sec_part=ts.next().unwrap_or("0"); let (sec, fraction)=sec_part.split_once('.').unwrap_or((sec_part,""));
+ let se=sec.parse::<i64>().ok()?; let ms=fraction.chars().take(3).collect::<String>().parse::<i64>().unwrap_or(0) * match fraction.len() { 0 => 0, 1 => 100, 2 => 10, _ => 1 };
+ let year_days=365*(y-1970)+(1970..y).filter(|year| *year%4==0 && (*year%100!=0 || *year%400==0)).count() as i64;
+ let leap= y%4==0 && (y%100!=0 || y%400==0); let month_days=[31,28 + leap as i64,31,30,31,30,31,31,30,31,30,31];
+ if d < 1 || d > month_days[(mo - 1) as usize] || !(0..=23).contains(&h) || !(0..=59).contains(&mi) || !(0..=59).contains(&se) { return None; }
+ let days=year_days+month_days[..(mo-1) as usize].iter().sum::<i64>()+d-1;
+ let offset=if zone.is_empty() || zone=="Z" {0} else { let sign=if zone.starts_with('+') {1} else {-1}; let z=&zone[1..]; let (zh,zm)=z.split_once(':').unwrap_or((z,"0")); sign*(zh.parse::<i64>().ok()?*3600+zm.parse::<i64>().ok()?*60) };
+ Some((days*86400+h*3600+mi*60+se-offset)*1000+ms)
+}
 impl RenderContext {
  pub fn from_value(raw: &Value, config: Option<&Value>) -> Self {
   let get = |p: &[&str]| -> Option<&Value> { let mut x=raw; for k in p { x=x.get(*k)?; } Some(x) };
