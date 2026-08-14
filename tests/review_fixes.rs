@@ -133,3 +133,39 @@ fn test_no_forks_without_external_segments() {
         "pure segments must not fork external lookups");
     assert!(!config_dir.join("lookups/cache.json").exists(), "pure segments must not create cache");
 }
+
+#[test]
+fn test_invalid_color_fail_safe() {
+    for value in ["red", "#f"] {
+        let temp = TempDir::new("invalid-color");
+        let config_dir = temp.path().join("config");
+        write_settings(&config_dir, serde_json::json!({
+            "segments": {"model": {"fg": value}},
+            "rows": [{"segments": ["model"]}]
+        }));
+
+        let output = render(&config_dir, &stdin(), |command| {
+            command.env("COLORTERM", "truecolor");
+        });
+        assert!(output.status.success(), "invalid color config must exit 0: {output:?}");
+        let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+
+        // Frozen TS: `red` fails liteValidate at /segments/model/fg and emits
+        // one fail-loud config-invalid warning; it never renders an ANSI color.
+        // Frozen TS: `#f` takes the same schema-invalid warning branch.
+        assert!(stdout.contains("warning") && stdout.contains("config invalid"),
+            "invalid color must fail loud: {stdout:?}");
+        assert_eq!(stdout.lines().count(), 1, "invalid color must only warn: {stdout:?}");
+        assert!(!stdout.contains("\x1b["), "invalid color must not render ANSI: {stdout:?}");
+    }
+}
+
+#[test]
+fn test_timeout_kill_is_cross_platform() {
+    let implementation = fs::read_to_string("src/segments/external.rs")
+        .expect("read external segment implementation");
+    assert!(implementation.contains("child.kill()"),
+        "timeout must use std::process::Child::kill");
+    assert!(!implementation.contains("/bin/kill"),
+        "timeout must not shell out to a platform-specific killer");
+}

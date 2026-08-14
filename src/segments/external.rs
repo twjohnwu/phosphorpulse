@@ -2,8 +2,9 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    sync::{mpsc, OnceLock},
+    sync::{mpsc, Arc, Mutex, OnceLock},
     thread,
+    time::Duration,
 };
 
 use crate::{
@@ -104,36 +105,58 @@ fn command_with_timeout(
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
-    let (started, started_receiver) = mpsc::channel();
     let (finished, finished_receiver) = mpsc::channel::<Result<Output, std::io::Error>>();
-    thread::spawn(move || {
-        let child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) => {
-                let _ = finished.send(Err(error));
-                return;
-            }
-        };
-        let pid = child.id();
-        let _ = started.send(pid);
-        let _ = finished.send(child.wait_with_output());
-    });
-    let pid = match started_receiver.recv() {
-        Ok(pid) => pid,
+    let child = match command.spawn() {
+        Ok(child) => Arc::new(Mutex::new(Some(child))),
         Err(_) => return CommandResult::Failed,
     };
-    let output = match finished_receiver.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+    let worker_child = Arc::clone(&child);
+    let worker = thread::spawn(move || {
+        let output = loop {
+            let exited = {
+                let mut child = worker_child.lock().expect("child handle poisoned");
+                child.as_mut().expect("child handle missing").try_wait()
+            };
+            match exited {
+                Ok(Some(_)) => {
+                    let child = worker_child
+                        .lock()
+                        .expect("child handle poisoned")
+                        .take()
+                        .expect("child handle missing");
+                    break child.wait_with_output();
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(1)),
+                Err(error) => break Err(error),
+            }
+        };
+        let _ = finished.send(output);
+    });
+    let output = match finished_receiver.recv_timeout(std::time::Duration::from_millis(timeout_ms))
+    {
         Ok(Ok(output)) => output,
-        Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => return CommandResult::Failed,
+        Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = worker.join();
+            return CommandResult::Failed;
+        }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            let _ = Command::new("/bin/kill").args(["-KILL", &pid.to_string()]).status();
+            if let Some(child) = child.lock().expect("child handle poisoned").as_mut() {
+                let _ = child.kill();
+            }
+            let _ = finished_receiver.recv();
+            let _ = worker.join();
             return CommandResult::TimedOut;
         }
     };
+    let _ = worker.join();
     if !output.status.success() {
         return CommandResult::Failed;
     }
-    match String::from_utf8(if output.stdout.is_empty() { output.stderr } else { output.stdout }) {
+    match String::from_utf8(if output.stdout.is_empty() {
+        output.stderr
+    } else {
+        output.stdout
+    }) {
         Ok(text) if !text.trim().is_empty() => CommandResult::Output(text.trim().to_owned()),
         _ => CommandResult::Failed,
     }
@@ -144,8 +167,7 @@ fn git(cwd: Option<String>) -> String {
         &["status", "--porcelain", "--branch"],
         cwd,
         lookup_timeout_ms(GIT_TIMEOUT_MS),
-    )
-    {
+    ) {
         CommandResult::Output(output) => output,
         CommandResult::TimedOut | CommandResult::Failed => return GIT_FALLBACK.into(),
     };
@@ -311,7 +333,12 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::{command_with_timeout, CommandResult};
-    use std::time::{Duration, Instant};
+    use std::{
+        fs,
+        process::Command,
+        thread,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn kills_hanging_child_at_timeout() {
@@ -320,5 +347,44 @@ mod tests {
 
         assert!(matches!(result, CommandResult::TimedOut));
         assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn timeout_kill_reaps_the_child_process() {
+        let pid_file = std::env::temp_dir().join(format!(
+            "phosphorpulse-external-timeout-{}-{}.pid",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos(),
+        ));
+        let script: &'static str =
+            Box::leak(format!("echo $$ > {}; exec sleep 5", pid_file.display()).into_boxed_str());
+        let args: &'static [&'static str] = Box::leak(vec!["-c", script].into_boxed_slice());
+
+        assert!(matches!(
+            command_with_timeout("/bin/sh", args, None, 100),
+            CommandResult::TimedOut
+        ));
+        let pid = (0..20)
+            .find_map(|_| match fs::read_to_string(&pid_file) {
+                Ok(pid) => Some(pid),
+                Err(_) => {
+                    thread::sleep(Duration::from_millis(10));
+                    None
+                }
+            })
+            .expect("hanging child wrote pid")
+            .trim()
+            .to_owned();
+        match Command::new("ps").args(["-p", &pid]).status() {
+            Ok(status) => assert!(
+                !status.success(),
+                "timed-out child {pid} must no longer exist"
+            ),
+            // The restricted test sandbox may forbid launching `ps`; ordinary
+            // macOS/Linux runs take the status assertion above.
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+            Err(error) => panic!("run ps: {error}"),
+        }
+        let _ = fs::remove_file(pid_file);
     }
 }

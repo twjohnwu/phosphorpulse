@@ -40,8 +40,26 @@ impl Config {
             return Err("/rows: must have at most 3 item(s)".into());
         }
         if let Some(bar_width) = self.0.get("gauge").and_then(|gauge| gauge.get("barWidth")) {
-            if !matches!(bar_width.as_f64(), Some(width) if width.fract() == 0.0 && (1.0..=80.0).contains(&width)) {
+            if !matches!(bar_width.as_f64(), Some(width) if width.fract() == 0.0 && (1.0..=80.0).contains(&width))
+            {
                 return Err("/gauge/barWidth: must be an integer between 1 and 80".into());
+            }
+        }
+        if let Some(segments) = self.0.get("segments") {
+            let segments = segments.as_object().ok_or("/segments: must be an object")?;
+            for (id, segment) in segments {
+                let segment = segment
+                    .as_object()
+                    .ok_or_else(|| format!("/segments/{id}: must be an object"))?;
+                for key in ["fg", "bg"] {
+                    if let Some(color) = segment.get(key) {
+                        if !matches!(color.as_str(), Some(value) if is_six_digit_hex(value)) {
+                            return Err(format!(
+                                "/segments/{id}/{key}: must match pattern ^#[0-9A-Fa-f]{{6}}$"
+                            ));
+                        }
+                    }
+                }
             }
         }
         for (index, row) in rows.iter().enumerate() {
@@ -71,4 +89,9 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn is_six_digit_hex(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(u8::is_ascii_hexdigit)
 }
