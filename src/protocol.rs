@@ -1,5 +1,32 @@
-use std::io::{self, Read};
+use std::{fs, io::{self, Read}, path::PathBuf};
 use serde_json::Value;
+
+const TRANSCRIPT_SUFFIX: &str = ".jsonl";
+
+/// Frozen TS parity: `agentType`, then `role`, then the stdin task `name`.
+/// Transcript metadata is best-effort: unreadable or malformed files simply
+/// leave the stdin fallback in place.
+pub fn resolve_subagent_role_name(task: &Value, transcript_path: Option<&str>) -> Option<String> {
+    let task_name = task.get("name").and_then(Value::as_str).map(str::to_owned);
+    let Some(task_id) = task.get("id").and_then(Value::as_str) else { return task_name; };
+    let Some(transcript_path) = transcript_path else { return task_name; };
+    if !transcript_path.ends_with(TRANSCRIPT_SUFFIX)
+        || !task_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return task_name;
+    }
+
+    let base = &transcript_path[..transcript_path.len() - TRANSCRIPT_SUFFIX.len()];
+    let meta_path = PathBuf::from(base).join("subagents").join(format!("agent-{task_id}.meta.json"));
+    let resolved = fs::read_to_string(meta_path).ok()
+        .and_then(|meta| serde_json::from_str::<Value>(&meta).ok())
+        .and_then(|meta| {
+            meta.get("agentType").and_then(Value::as_str).filter(|value| !value.is_empty())
+                .or_else(|| meta.get("role").and_then(Value::as_str).filter(|value| !value.is_empty()))
+                .map(str::to_owned)
+        });
+    resolved.or(task_name)
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Window { pub used_percentage: Option<f64>, pub resets_at: Option<i64> }

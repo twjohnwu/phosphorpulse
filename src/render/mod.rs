@@ -226,8 +226,11 @@ pub fn render_subagent(raw: Value) {
         .unwrap_or_else(|| t.subagent.iter().map(String::as_str).collect());
     for task in tasks.into_iter().flatten().take(20) {
         let detail = task.get("description").or_else(|| task.get("label")).and_then(Value::as_str);
-        let identity = task.get("name").and_then(Value::as_str);
-        let name = identity.or(detail);
+        let identity = crate::protocol::resolve_subagent_role_name(
+            task,
+            raw.get("transcript_path").and_then(Value::as_str),
+        );
+        let name = identity.as_deref().or(detail);
         let mut parts = Vec::new();
         for id in &ids {
             let rendered = match *id {

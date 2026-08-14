@@ -410,3 +410,49 @@ fn test_pomodoro_workmin_bounds() {
         "valid workMin must render one row"
     );
 }
+
+#[test]
+fn test_subagent_name_from_transcript_meta() {
+    let temp = TempDir::new("subagent-transcript-meta");
+    let config_dir = temp.path().join("config");
+    write_settings(&config_dir, serde_json::json!({
+        "colorDepth": "none",
+        "subagent": {"segments": ["name"]}
+    }));
+
+    let transcript = temp.path().join("session.jsonl");
+    fs::write(&transcript, "").expect("write empty transcript");
+    let task_id = "ranger_task";
+    let meta_dir = temp.path().join("session/subagents");
+    fs::create_dir_all(&meta_dir).expect("create transcript subagents directory");
+    let meta = meta_dir.join(format!("agent-{task_id}.meta.json"));
+    fs::write(&meta, br#"{"agentType":"ranger-pathfinder"}"#).expect("write agent meta");
+
+    let fixture = fs::read("tests/golden/subagent-default/stdin.json")
+        .expect("read subagent stdin fixture");
+    let mut input: serde_json::Value = serde_json::from_slice(&fixture).expect("parse subagent stdin fixture");
+    input["transcript_path"] = serde_json::json!(transcript);
+    input["tasks"][0]["id"] = serde_json::json!(task_id);
+    let input = serde_json::to_vec(&input).expect("serialize subagent stdin");
+
+    let output = render(&config_dir, &input, |command| { command.arg("--subagent"); });
+    assert!(output.status.success(), "subagent render failed: {:?}", output.stderr);
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    let rendered: serde_json::Value = serde_json::from_str(stdout.trim()).expect("parse subagent output");
+    assert!(rendered["content"].as_str().expect("subagent content").contains("ranger-pathfinder"),
+        "transcript meta agentType must supply the name: {stdout:?}");
+
+    fs::remove_file(&meta).expect("remove agent meta");
+    let fallback = render(&config_dir, &input, |command| {
+        command.arg("--subagent").env("PPULSE_NOW_MS", "1785600000000");
+    });
+    assert!(fallback.status.success(), "subagent fallback render failed: {:?}", fallback.stderr);
+    let mut without_transcript: serde_json::Value = serde_json::from_slice(&input).expect("parse fallback stdin");
+    without_transcript.as_object_mut().expect("fallback stdin object").remove("transcript_path");
+    let without_transcript = serde_json::to_vec(&without_transcript).expect("serialize fallback stdin");
+    let before = render(&config_dir, &without_transcript, |command| {
+        command.arg("--subagent").env("PPULSE_NOW_MS", "1785600000000");
+    });
+    assert!(before.status.success(), "pre-meta fallback render failed: {:?}", before.stderr);
+    assert_eq!(fallback.stdout, before.stdout, "missing meta must preserve the prior output");
+}
