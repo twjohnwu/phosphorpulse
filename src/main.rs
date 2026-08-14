@@ -1,11 +1,4 @@
-mod atomic_write;
-mod clock;
-mod config;
-mod jsx;
-mod migrate;
-mod protocol;
-mod render;
-mod segments;
+use phosphorpulse::{config, migrate, protocol, render};
 
 fn main() {
     match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
@@ -20,12 +13,15 @@ fn main() {
     }
 }
 
-fn render_command(render: fn()) {
-    if let Err(reason) = protocol::read_stdin_json() {
+fn render_command(render: fn(serde_json::Value)) {
+    let raw = match protocol::read_stdin_json() {
+        Ok(raw) => raw,
+        Err(reason) => {
         eprintln!("phosphorpulse: invalid stdin: {reason}");
         std::process::exit(1);
-    }
-    render();
+        }
+    };
+    render(raw);
 }
 
 fn no_args() {

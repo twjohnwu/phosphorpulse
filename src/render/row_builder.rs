@@ -1,1 +1,3 @@
-pub struct RowBuilder;
+use crate::jsx::width::display_width;
+pub const FLEX:&str="\0FLEX\0";
+pub fn build_row(segments:&[String],layout:&str,width:usize,sep:&str)->String {let width=if width==0{80}else{width};let p:Vec<String>=segments.iter().map(|s|if s==FLEX{FLEX.into()}else{format!(" {s} ")}).collect();if layout=="fixed" {let mut o=String::new();for (i,s) in p.iter().enumerate(){if i>0{o+=sep}o+=s;if display_width(&o)>=width{break}}return o;}let mut kept=Vec::new();let mut used=0;for s in p {let extra=if kept.is_empty(){0}else{display_width(sep)};let sw=if s==FLEX{0}else{display_width(&s)};if used+extra+sw>width{break}used+=extra+sw;kept.push(s)}let fill=" ".repeat(width-used);let mut flex=false;kept.into_iter().enumerate().map(|(i,s)|{let pre=if i==0{""}else{sep};if s==FLEX&&!flex{flex=true;format!("{pre}{fill}")}else if s==FLEX{pre.into()}else{format!("{pre}{s}")}}).collect()}

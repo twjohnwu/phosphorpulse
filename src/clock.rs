@@ -1,1 +1,1 @@
-pub struct Clock;
+pub fn now_ms() -> i64 { std::env::var("PPULSE_NOW_MS").ok().and_then(|v|v.parse().ok()).unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64) }

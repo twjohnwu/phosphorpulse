@@ -1,1 +1,16 @@
-pub struct Simple;
+use crate::{clock, jsx::number::to_fixed_2, protocol::{RenderContext, Window}};
+pub const DIM: &str = "\0text-dim\0";
+#[derive(Clone, Debug)] pub struct Segment { pub text:String, pub fg:Option<&'static str>, pub bold:bool }
+fn gauge(p:f64,w:usize)->String { let p=p.clamp(0.,100.); let n=(p*w as f64/100.).round() as usize; format!("{}{}", "▰".repeat(n), "▱".repeat(w.saturating_sub(n))) }
+fn gauge_color(p:f64,c:&RenderContext, ctx:bool)->&'static str { if p>=c.hot_pct {"hot"} else if p>=c.warn_pct {"warn"} else if ctx {"ctx.ok"} else {"ok"} }
+pub fn tokens(n:f64)->String { let n=n.trunc() as i64; if n>=1_000_000 {format!("{}.{}M",n/1_000_000,(n%1_000_000)/100_000)} else if n>=1000 {format!("{}.{}k",n/1000,(n%1000)/100)} else {n.to_string()} }
+pub fn model(c:&RenderContext)->Option<Segment>{c.model_display_name.as_ref().map(|v|Segment{text:format!("◆ {v}"),fg:Some("model"),bold:true})}
+pub fn effort(c:&RenderContext)->Option<Segment>{c.effort_level.as_ref().map(|v|Segment{text:format!("ψ {}",if v=="medium"{"med"}else{v}),fg:Some("effort"),bold:false})}
+pub fn dir(c:&RenderContext)->Option<Segment>{let mut p=c.cwd.clone()?; if let Ok(h)=std::env::var("HOME") {if p==h {p="~".into()} else if p.starts_with(&(h.clone()+"/")){p=format!("~{}",&p[h.len()..])}} let abs=p.starts_with('/'); let a:Vec<_>=p.split('/').filter(|x|!x.is_empty()).collect(); let k=if c.path_depth>0&&c.path_depth<a.len(){&a[a.len()-c.path_depth..]}else{&a}; Some(Segment{text:format!("{}{}",if abs{"/"}else{""},k.join("/")),fg:Some("dir"),bold:true})}
+pub fn ctx(c:&RenderContext)->Option<Segment>{let p=c.context_used_percentage?;let mut t=format!("⬡ {} {}%",gauge(p,c.gauge_width),p.round() as i64);if let(Some(a),Some(b),Some(d),Some(e))=(c.total_input_tokens,c.total_output_tokens,c.cache_read_input_tokens,c.cache_creation_input_tokens){t+=&format!(" {DIM}↑{} ↓{} cr:{} cw:{}",tokens(a),tokens(b),tokens(d),tokens(e));}Some(Segment{text:t,fg:Some(gauge_color(p,c,true)),bold:false})}
+fn countdown(r:i64)->String{let s=(r-clock::now_ms())/1000;if s<=0{return "now".into()}let d=s/86400;let h=(s%86400)/3600;let m=(s%3600)/60;if d>0{format!("{d}d{h:02}h")}else if h>0{format!("{h}h{m:02}m")}else{format!("{m}m")}}
+fn limit(label:&str,w:&Window,c:&RenderContext)->Option<Segment>{let p=w.used_percentage?;let mut t=format!("{label} {} {}%",gauge(p,c.gauge_width),p.round() as i64);if let Some(r)=w.resets_at{t+=&format!(" {DIM}↺{}",countdown(r));}Some(Segment{text:t,fg:Some(gauge_color(p,c,false)),bold:false})}
+pub fn limit5h(c:&RenderContext)->Option<Segment>{limit("5h",&c.five_hour,c)} pub fn limit7d(c:&RenderContext)->Option<Segment>{limit("7d",&c.seven_day,c)}
+pub fn version(c:&RenderContext)->Option<Segment>{c.version.as_ref().map(|v|Segment{text:format!("v{v}"),fg:Some("version"),bold:false})}
+pub fn cost(c:&RenderContext)->Option<Segment>{match c.total_cost_usd{Some(x)if x!=0.=>Some(Segment{text:format!("${}",to_fixed_2(x)),fg:Some("cost"),bold:false}),_=>None}}
+pub fn burn(c:&RenderContext)->Option<Segment>{let d=c.total_duration_ms?;if d<=0.{return None}let mut best:Option<(&str,f64)>=None;for (n,w) in [("5h",&c.five_hour),("7d",&c.seven_day)]{if let Some(p)=w.used_percentage.filter(|p|*p>0.){let eta=(100.-p)/(p/d);if best.map(|x|eta<x.1).unwrap_or(true){best=Some((n,eta))}}}let (n,e)=best?;let s=(e/1000.).round().max(0.) as i64;let h=s/3600;let m=(s%3600)/60;Some(Segment{text:format!("⚡ {n} ⇢ {}",if h>0{format!("{h}h{m:02}m")}else{format!("{m}m")}),fg:Some("clock"),bold:false})}
