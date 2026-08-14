@@ -45,6 +45,27 @@ impl Config {
                 return Err("/gauge/barWidth: must be an integer between 1 and 80".into());
             }
         }
+        if let Some(work_min) = self
+            .0
+            .get("pomodoro")
+            .and_then(|pomodoro| pomodoro.get("workMin"))
+        {
+            match work_min.as_f64() {
+                Some(value) if value.fract() == 0.0 && value < 5.0 => {
+                    return Err(format!("/pomodoro/workMin: must be >= 5, got {value}"));
+                }
+                Some(value) if value.fract() == 0.0 && value > 90.0 => {
+                    return Err(format!("/pomodoro/workMin: must be <= 90, got {value}"));
+                }
+                Some(value) if value.fract() == 0.0 => {}
+                Some(value) => {
+                    return Err(format!(
+                        "/pomodoro/workMin: must be an integer, got {value}"
+                    ));
+                }
+                None => return Err("/pomodoro/workMin: must be an integer".into()),
+            }
+        }
         if let Some(segments) = self.0.get("segments") {
             let segments = segments.as_object().ok_or("/segments: must be an object")?;
             for (id, segment) in segments {

@@ -328,3 +328,85 @@ fn test_pin_only_render_preserves_cache() {
     .expect("parse cache after render");
     assert_eq!(after, original, "pin-only render must preserve all warm cache entries");
 }
+
+#[test]
+fn test_leansep_ignored_like_ts() {
+    let temp = TempDir::new("leansep-threaded");
+    let config_dir = temp.path().join("config");
+    write_settings(
+        &config_dir,
+        serde_json::json!({
+            "leanSep": " | ",
+            "rows": [{"layout": "auto", "segments": ["model", "effort"]}]
+        }),
+    );
+
+    let output = render(&config_dir, &stdin(), |_| {});
+    assert!(
+        output.status.success(),
+        "leanSep render failed: {:?}",
+        output.stderr
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    // Empirical TS evidence: frozen render/index.ts:356 omits leanSep; measured
+    // 2026-08-15, TS output shows no separator. This intentional bug-for-bug
+    // parity may be fixed on both sides together in a future change.
+    assert!(
+        !stdout.contains(" | "),
+        "leanSep must be ignored like TS: {stdout:?}"
+    );
+}
+
+#[test]
+fn test_pomodoro_workmin_bounds() {
+    let temp = TempDir::new("pomodoro-workmin-bounds");
+    let config_dir = temp.path().join("config");
+    write_settings(
+        &config_dir,
+        serde_json::json!({
+            "pomodoro": {"workMin": 0},
+            "rows": [{"segments": ["pomodoro"]}]
+        }),
+    );
+
+    let invalid = render(&config_dir, &stdin(), |_| {});
+    assert!(
+        invalid.status.success(),
+        "invalid workMin must exit 0: {:?}",
+        invalid
+    );
+    let invalid_stdout = String::from_utf8(invalid.stdout).expect("UTF-8 stdout");
+    assert!(
+        invalid_stdout.contains("warning") && invalid_stdout.contains("config invalid"),
+        "invalid workMin must fail loud: {invalid_stdout:?}"
+    );
+    assert_eq!(
+        invalid_stdout.lines().count(),
+        1,
+        "invalid workMin must not render: {invalid_stdout:?}"
+    );
+
+    write_settings(
+        &config_dir,
+        serde_json::json!({
+            "pomodoro": {"workMin": 5},
+            "rows": [{"segments": ["pomodoro"]}]
+        }),
+    );
+    let valid = render(&config_dir, &stdin(), |_| {});
+    assert!(
+        valid.status.success(),
+        "valid workMin render failed: {:?}",
+        valid.stderr
+    );
+    let valid_stdout = String::from_utf8(valid.stdout).expect("UTF-8 stdout");
+    assert!(
+        !valid_stdout.contains("warning"),
+        "valid workMin must render: {valid_stdout:?}"
+    );
+    assert_eq!(
+        valid_stdout.lines().count(),
+        1,
+        "valid workMin must render one row"
+    );
+}
