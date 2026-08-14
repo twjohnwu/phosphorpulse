@@ -1,0 +1,130 @@
+[
+  {
+    "input": "",
+    "width": 0
+  },
+  {
+    "input": "A",
+    "width": 1
+  },
+  {
+    "input": "hello",
+    "width": 5
+  },
+  {
+    "input": "中",
+    "width": 2
+  },
+  {
+    "input": "中文",
+    "width": 4
+  },
+  {
+    "input": "台灣",
+    "width": 4
+  },
+  {
+    "input": "🇹🇼",
+    "width": 1
+  },
+  {
+    "input": "❤️",
+    "width": 1
+  },
+  {
+    "input": "♥",
+    "width": 1
+  },
+  {
+    "input": "👨‍👩‍👧‍👦",
+    "width": 2
+  },
+  {
+    "input": "👩‍💻",
+    "width": 2
+  },
+  {
+    "input": "😀",
+    "width": 2
+  },
+  {
+    "input": "a中b",
+    "width": 4
+  },
+  {
+    "input": "ＡＢＣ",
+    "width": 6
+  },
+  {
+    "input": "AＡ中",
+    "width": 5
+  },
+  {
+    "input": "é",
+    "width": 1
+  },
+  {
+    "input": "न",
+    "width": 1
+  },
+  {
+    "input": "한글",
+    "width": 4
+  },
+  {
+    "input": "￥",
+    "width": 2
+  },
+  {
+    "input": "ｶ",
+    "width": 1
+  },
+  {
+    "input": "\u001b[31mred\u001b[0m",
+    "width": 3
+  },
+  {
+    "input": "x\u001b[1;34my\u001b[0mz",
+    "width": 3
+  },
+  {
+    "input": "\n",
+    "width": 1
+  },
+  {
+    "input": "\t",
+    "width": 1
+  },
+  {
+    "input": "©",
+    "width": 1
+  },
+  {
+    "input": "™️",
+    "width": 1
+  },
+  {
+    "input": "🏳️‍🌈",
+    "width": 2
+  },
+  {
+    "input": "👨‍👩‍👧‍👦中",
+    "width": 4
+  },
+  {
+    "input": "🇹🇼❤️",
+    "width": 2
+  },
+  {
+    "input": "abc中def",
+    "width": 8
+  },
+  {
+    "input": "𠀀",
+    "width": 2
+  },
+  {
+    "input": "·",
+    "width": 1
+  }
+]

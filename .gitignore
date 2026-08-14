@@ -1,0 +1,16 @@
+/target
+/target
+
+# LLM
+AGENTS.local.md
+CLAUDE.local.md
+.claude/*
+.cursor/*
+.opencode/*
+.serena/*
+.specify/*
+.superpowers/*
+openspec/*
+specs/*
+
+STDD/

@@ -1,0 +1,11 @@
+{
+  "activeTemplate": "matrix-tron",
+  "colorDepth": "auto",
+  "rows": [
+    { "layout": "auto", "segments": ["model", "effort", "git", "dir", "flex", "ctx"] },
+    { "layout": "auto", "segments": ["limit5h", "pomodoro", "node", "flex", "burn", "version", "limit7d"] }
+  ],
+  "subagent": { "segments": ["name", "desc", "model", "effort", "ctx", "elapsed"] },
+  "gauge": { "barWidth": 20, "warnPct": 65, "hotPct": 85 },
+  "segments": { "dir": { "pathDepth": 99 } }
+}

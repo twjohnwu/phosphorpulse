@@ -1,0 +1,2 @@
+#!/bin/sh
+printf '%s\n' '## main...origin/main [ahead 1]' ' M src/example.ts'
