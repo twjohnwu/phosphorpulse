@@ -181,8 +181,10 @@ fn command_with_timeout(
             if let Some(child) = child.lock().expect("child handle poisoned").as_mut() {
                 let _ = child.kill();
             }
-            let _ = finished_receiver.recv();
-            let _ = worker.join();
+            // A descendant of a wrapper may retain these pipes after the direct
+            // child is killed.  Detach the worker/readers rather than waiting
+            // for EOF, so a lookup timeout always returns its fallback promptly.
+            drop(finished_receiver);
             return CommandResult::TimedOut;
         }
     };

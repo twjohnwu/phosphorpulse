@@ -268,3 +268,31 @@ fn test_large_git_output_no_false_timeout() {
     assert!(stdout.contains("main*"), "large git output must retain branch and dirty marker: {stdout:?}");
     assert!(!stdout.contains("git:—"), "large git output must not time out: {stdout:?}");
 }
+
+#[test]
+fn test_wrapper_grandchild_timeout_returns_fast() {
+    use std::time::{Duration, Instant};
+
+    let temp = TempDir::new("wrapper-grandchild-timeout");
+    let config_dir = temp.path().join("config");
+    let stub_bin = temp.path().join("bin");
+    fs::create_dir_all(&stub_bin).expect("create stub bin");
+    write_settings(&config_dir, serde_json::json!({"rows": [{"segments": ["git"]}]}));
+    write_lookup_stub(&stub_bin.join("git"), "( sleep 10 ) &\nsleep 10");
+
+    let warm_counter = temp.path().join("warm-counter");
+    assert!(Command::new(stub_bin.join("git")).env("PPULSE_LOOKUP_COUNTER", &warm_counter)
+        .stdout(Stdio::null()).status().expect("warm stub").success());
+
+    let path = format!("{}:{}", stub_bin.display(), std::env::var("PATH").expect("PATH set"));
+    let start = Instant::now();
+    let output = render(&config_dir, &input_with_cwd(temp.path()), |command| {
+        command.env("PATH", path);
+    });
+    let elapsed = start.elapsed();
+    eprintln!("wrapper grandchild render elapsed: {elapsed:?}");
+    assert!(elapsed < Duration::from_secs(2), "wrapper grandchild timeout took {elapsed:?}");
+    assert!(output.status.success(), "wrapper render failed: {:?}", output.stderr);
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    assert!(stdout.contains("git:—"), "git timeout fallback missing: {stdout:?}");
+}
