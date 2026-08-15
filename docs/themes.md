@@ -10,7 +10,7 @@ phosphorpulse includes three built-in themes:
 
 ![Colors & Theme](images/colors-theme.png)
 
-The TUI's Templates feature supports save-as, load, export, and import. Import validates a template file and saves it only in the `templates/` directory; it does not change the current working draft, so load the imported template afterward to apply it. When loading a template, its rows, subagent, gauge, segments, and name are applied, but a custom color palette is not applied. This matches a limitation in the original TypeScript phosphorflux project.
+The TUI's Templates feature supports save-as, load, export, import, and delete (`d`; saved templates only — built-in templates cannot be deleted). Export writes to `~/Desktop/<name>.json` by default; the path can be edited before confirming. Import validates a template file and saves it only in the `templates/` directory; it does not change the current working draft, so load the imported template afterward to apply it. When loading a template, its rows, subagent, gauge, segments, and name are applied, but a custom color palette is not applied. This matches a limitation in the original TypeScript phosphorflux project.
 
 ![Templates](images/templates.png)
 

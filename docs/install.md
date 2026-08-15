@@ -81,7 +81,7 @@ Choose either the wizard or a manual edit.
    ![Wizard — Nerd Font](images/wizard-nerd-font.png)
 
    ![Wizard — template](images/wizard-template.png)
-3. Binary detection only checks whether `phosphorpulse` is already on `PATH`; it never installs the binary. If it is missing, install it with Route A or Route B, then press any key to detect it again.
+3. Binary detection checks `PATH` and `~/.local/bin`. If the binary is missing, press `b` to let the wizard copy the currently running binary into `~/.local/bin` (confirm with `y`), or install it with Route A or Route B and press any key to detect it again — both options also work from the not-found screen after a failed re-scan.
 4. After choosing a template, confirm the settings write with `y` (or Enter). This writes the Claude Code blocks to `~/.claude/settings.json`; when that file already exists, it first creates a `settings.json.bak-<timestamp>` backup. The wizard then writes phosphorpulse's own configuration.
 
    ![Wizard — confirm](images/wizard-confirm.png)

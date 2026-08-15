@@ -10,7 +10,7 @@ phosphorpulse 內建三種 themes：
 
 ![顏色與主題](images/colors-theme.zh-TW.png)
 
-TUI 的 Templates 功能支援 save-as、load、export 與 import。Import 會驗證 template file 並只將它存到 `templates/` directory；不會改變目前的 working draft，因此匯入後仍須 load 該 template 才會套用。Load template 時，會套用其 rows、subagent、gauge、segments 與 name，但不會套用自訂的 color palette。這與原始 TypeScript phosphorflux 專案的限制一致。
+TUI 的 Templates 功能支援 save-as、load、export、import 與 delete（`d`；僅限已儲存的 templates——內建 templates 不可刪除）。Export 預設寫到 `~/Desktop/<name>.json`，確認前可修改路徑。Import 會驗證 template file 並只將它存到 `templates/` directory；不會改變目前的 working draft，因此匯入後仍須 load 該 template 才會套用。Load template 時，會套用其 rows、subagent、gauge、segments 與 name，但不會套用自訂的 color palette。這與原始 TypeScript phosphorflux 專案的限制一致。
 
 ![範本](images/templates.zh-TW.png)
 

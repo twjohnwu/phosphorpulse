@@ -81,7 +81,7 @@ Read this in: [English](install.md)
    ![設定精靈──Nerd Font](images/wizard-nerd-font.zh-TW.png)
 
    ![設定精靈──範本](images/wizard-template.zh-TW.png)
-3. Binary detection 只檢查 `phosphorpulse` 是否已在 `PATH` 上；它絕不會安裝 binary。若找不到，請依 Route A 或 Route B 安裝，然後按任意鍵重新偵測。
+3. Binary detection 會檢查 `PATH` 與 `~/.local/bin`。若找不到，可按 `b` 讓 wizard 將目前執行中的 binary 複製到 `~/.local/bin`（按 `y` 確認），或依 Route A / Route B 安裝後按任意鍵重新偵測——重掃失敗的畫面上這兩個選項同樣可用。
 4. 選擇 template 後，以 `y`（或 Enter）確認 settings write。這會將 Claude Code blocks 寫入 `~/.claude/settings.json`；若該檔案已存在，會先建立 `settings.json.bak-<timestamp>` backup。接著 wizard 會寫入 phosphorpulse 自己的 configuration。
 
    ![設定精靈──確認寫入](images/wizard-confirm.zh-TW.png)
