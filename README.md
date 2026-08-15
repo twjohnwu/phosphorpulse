@@ -11,7 +11,7 @@ A fast Rust statusline renderer for Claude Code: a byte-parity rewrite of the Ty
 
 | Implementation | Intel median | Intel p10–p90 | CPU @1s (Intel) | M2 median | M2 p10–p90 | CPU @1s (M2) | Speedup vs TS (Intel / M2) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| TypeScript (phosphorflux) | 247.8 ms | 241.0–253.2 ms | ~24.8% | 478.5 ms | 374.5–510.3 ms | ~47.8% | 1x |
+| TypeScript ([phosphorflux](https://github.com/twjohnwu/phosphorflux)) | 247.8 ms | 241.0–253.2 ms | ~24.8% | 478.5 ms | 374.5–510.3 ms | ~47.8% | 1x |
 | Bash (coralline) | 43.4 ms | 42.5–44.3 ms | ~4.3% | 44.6 ms | 43.5–47.1 ms | ~4.5% | ~5.7x / ~10.7x |
 | Rust (phosphorpulse) | **6.8 ms** | 6.4–7.7 ms | **~0.7%** | **8.4 ms** | 7.7–8.9 ms | **~0.8%** | **~36x / ~57x** |
 
