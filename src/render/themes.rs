@@ -29,7 +29,7 @@ fn common(p: BTreeMap<String, String>) -> Theme {
             Row {
                 layout: "auto".into(),
                 segments: vec![
-                    "limit5h", "pomodoro", "node", "flex", "burn", "version", "limit7d",
+                    "limit5h", "pomodoro", "node", "python", "flex", "burn", "version", "limit7d",
                 ]
                 .into_iter()
                 .map(str::to_string)
@@ -52,8 +52,12 @@ pub fn builtin(name: &str) -> Theme {
             ("model", "#93A1A1"),
             ("version", "#586E75"),
             ("ctx.ok", "#859900"),
+            ("gauge.ctx-well", "#073642"),
+            ("gauge.5h-well", "#073642"),
+            ("gauge.7d-well", "#073642"),
             ("cost", "#657B83"),
             ("clock", "#CB4B16"),
+            ("burn", "#CB4B16"),
             ("effort", "#6C71C4"),
             ("node", "#859900"),
             ("python", "#268BD2"),
@@ -76,8 +80,12 @@ pub fn builtin(name: &str) -> Theme {
             ("model", "#586E75"),
             ("version", "#93A1A1"),
             ("ctx.ok", "#859900"),
+            ("gauge.ctx-well", "#EEE8D5"),
+            ("gauge.5h-well", "#EEE8D5"),
+            ("gauge.7d-well", "#EEE8D5"),
             ("cost", "#839496"),
             ("clock", "#CB4B16"),
+            ("burn", "#CB4B16"),
             ("effort", "#6C71C4"),
             ("node", "#859900"),
             ("python", "#268BD2"),
@@ -103,7 +111,8 @@ pub fn builtin(name: &str) -> Theme {
             ("gauge.ctx-well", "#121612"),
             ("gauge.5h-well", "#0E120E"),
             ("gauge.7d-well", "#0A0E0A"),
-            ("cost", "#282D2A"),
+            ("cost", "#008F11"),
+            ("burn", "#008F11"),
             ("clock", "#003232"),
             ("effort", "#008F11"),
             ("node", "#00E5FF"),

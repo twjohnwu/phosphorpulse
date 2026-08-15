@@ -144,8 +144,7 @@ fn test_req01_no_args_exit1() {
     let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
     assert!(!stdout.is_empty(), "no-args explanation must not be empty");
     assert!(
-        (stdout.contains("TUI") && stdout.to_lowercase().contains("not implemented"))
-            || stdout.contains("settings.json"),
-        "no-args explanation must mention the unimplemented TUI or settings.json"
+        stdout.contains("TUI") && stdout.to_lowercase().contains("terminal"),
+        "no-args explanation must say the TUI needs an interactive terminal"
     );
 }

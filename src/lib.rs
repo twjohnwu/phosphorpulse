@@ -1,3 +1,5 @@
+extern crate self as phosphorpulse;
+
 pub mod atomic_write;
 pub mod clock;
 pub mod config;
@@ -6,3 +8,4 @@ pub mod migrate;
 pub mod protocol;
 pub mod render;
 pub mod segments;
+pub mod tui;

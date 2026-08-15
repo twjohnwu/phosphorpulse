@@ -1,4 +1,4 @@
-/target
+# Build
 /target
 
 # LLM
@@ -11,7 +11,9 @@ CLAUDE.local.md
 .specify/*
 .superpowers/*
 openspec/*
+wiki/*
+wiki/
 specs/*
-
+STDD/*
 STDD/
 .DS_Store

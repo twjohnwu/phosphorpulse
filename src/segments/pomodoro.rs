@@ -232,8 +232,8 @@ fn json_number(number: f64) -> Value {
 
 fn notify(phase: Phase) {
     let script = match phase {
-        Phase::Work => "display notification \"Time to work! ⏱\" with title \"phosphorflux\"",
-        _ => "display notification \"Get some rest! ☕\" with title \"phosphorflux\"",
+        Phase::Work => "display notification \"Time to work! ⏱\" with title \"phosphorpulse\"",
+        _ => "display notification \"Get some rest! ☕\" with title \"phosphorpulse\"",
     };
     let _ = Command::new("osascript").args(["-e", script]).spawn();
 }

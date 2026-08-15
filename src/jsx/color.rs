@@ -27,16 +27,52 @@ pub fn downgrade(hex: &str) -> (u8, u8) {
     (nearest_256(rgb), nearest_16(rgb))
 }
 
-fn parse_hex(hex: &str) -> [u8; 3] {
+/// Mirrors the frozen renderer's `parseInt(clean.slice(...), 16)` conversion.
+/// Invalid or absent slices deliberately become NaN: JavaScript's subsequent
+/// nearest-colour comparisons leave their first candidate selected.
+pub fn parse_hex(hex: &str) -> Rgb {
     let hex = hex.strip_prefix('#').unwrap_or(hex);
     [
-        u8::from_str_radix(&hex[0..2], 16).unwrap(),
-        u8::from_str_radix(&hex[2..4], 16).unwrap(),
-        u8::from_str_radix(&hex[4..6], 16).unwrap(),
+        parse_hex_slice(hex.get(0..2)),
+        parse_hex_slice(hex.get(2..4)),
+        parse_hex_slice(hex.get(4..6)),
     ]
 }
 
-fn nearest_256(rgb: [u8; 3]) -> u8 {
+fn parse_hex_slice(slice: Option<&str>) -> f64 {
+    let Some(slice) = slice else {
+        return f64::NAN;
+    };
+    let slice = slice.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let (negative, digits) = match slice.as_bytes().first() {
+        Some(b'-') => (true, &slice[1..]),
+        Some(b'+') => (false, &slice[1..]),
+        _ => (false, slice),
+    };
+    let mut value = 0u16;
+    let mut parsed = false;
+    for byte in digits.bytes() {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => break,
+        };
+        parsed = true;
+        value = value * 16 + u16::from(digit);
+    }
+    if parsed {
+        if negative {
+            -(value as f64)
+        } else {
+            value as f64
+        }
+    } else {
+        f64::NAN
+    }
+}
+
+fn nearest_256(rgb: Rgb) -> u8 {
     let target = lab(rgb);
     let mut best = (16, f64::INFINITY);
     for r in 0..6 {
@@ -45,7 +81,11 @@ fn nearest_256(rgb: [u8; 3]) -> u8 {
                 let index = 16 + 36 * r + 6 * g + b;
                 choose(
                     target,
-                    [CUBE_LEVELS[r], CUBE_LEVELS[g], CUBE_LEVELS[b]],
+                    [
+                        f64::from(CUBE_LEVELS[r]),
+                        f64::from(CUBE_LEVELS[g]),
+                        f64::from(CUBE_LEVELS[b]),
+                    ],
                     index as u8,
                     &mut best,
                 );
@@ -54,23 +94,24 @@ fn nearest_256(rgb: [u8; 3]) -> u8 {
     }
     for i in 0..24 {
         let v = 8 + 10 * i;
+        let v = f64::from(v);
         choose(target, [v, v, v], (232 + i) as u8, &mut best);
     }
     best.0
 }
 
-fn nearest_16(rgb: [u8; 3]) -> u8 {
+fn nearest_16(rgb: Rgb) -> u8 {
     let bright = luminance(rgb) >= 0.5;
     let palette = if bright { &BRIGHT } else { &STANDARD };
     let target = lab(rgb);
     let mut best = (0, f64::INFINITY);
     for (offset, candidate) in palette.iter().enumerate() {
-        choose(target, *candidate, offset as u8, &mut best);
+        choose(target, candidate.map(f64::from), offset as u8, &mut best);
     }
     (if bright { 90 } else { 30 }) + best.0
 }
 
-fn choose(target: Rgb, candidate: [u8; 3], index: u8, best: &mut (u8, f64)) {
+fn choose(target: Rgb, candidate: Rgb, index: u8, best: &mut (u8, f64)) {
     let candidate = lab(candidate);
     let distance = ((target[0] - candidate[0]).powi(2)
         + (target[1] - candidate[1]).powi(2)
@@ -81,8 +122,8 @@ fn choose(target: Rgb, candidate: [u8; 3], index: u8, best: &mut (u8, f64)) {
     }
 }
 
-fn linear(channel: u8) -> f64 {
-    let c = channel as f64 / 255.0;
+fn linear(channel: f64) -> f64 {
+    let c = channel / 255.0;
     if c <= 0.04045 {
         c / 12.92
     } else {
@@ -90,11 +131,11 @@ fn linear(channel: u8) -> f64 {
     }
 }
 
-fn luminance(rgb: [u8; 3]) -> f64 {
+fn luminance(rgb: Rgb) -> f64 {
     0.2126 * linear(rgb[0]) + 0.7152 * linear(rgb[1]) + 0.0722 * linear(rgb[2])
 }
 
-fn lab(rgb: [u8; 3]) -> Rgb {
+fn lab(rgb: Rgb) -> Rgb {
     let (r, g, b) = (linear(rgb[0]), linear(rgb[1]), linear(rgb[2]));
     let (x, y, z) = (
         r * 0.4124 + g * 0.3576 + b * 0.1805,

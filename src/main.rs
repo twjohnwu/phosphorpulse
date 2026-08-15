@@ -1,4 +1,5 @@
-use phosphorpulse::{config, migrate, protocol, render};
+use phosphorpulse::{config, migrate, protocol, render, tui};
+use std::io::IsTerminal;
 
 fn main() {
     match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
@@ -32,8 +33,15 @@ fn render_command(render: fn(serde_json::Value)) {
 }
 
 fn no_args() {
-    println!(
-        "The phosphorpulse TUI is not implemented; edit settings.json by hand or use the phosphorflux TUI, then migrate."
-    );
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        match tui::run_tui() {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("phosphorpulse: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    println!("phosphorpulse requires an interactive terminal to open its TUI.");
     std::process::exit(1);
 }
