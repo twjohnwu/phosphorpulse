@@ -31,7 +31,8 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "phosphorpulse render"
+    "command": "phosphorpulse render",
+    "refreshInterval": 1
   },
   "subagentStatusLine": {
     "type": "command",
@@ -39,6 +40,8 @@
   }
 }
 ```
+
+`refreshInterval: 1` 讓時間型 segments（pomodoro、時鐘、重置倒數）每秒跳動；單次 render 約占單核 0.7%。
 
 TUI 的 **Settings & Install** 畫面或首次執行的 setup wizard 可自動加入這些 entries。寫入前會顯示 diff、要求確認，並備份既有的 `settings.json`。
 

@@ -96,7 +96,8 @@ Add these two blocks to `~/.claude/settings.json` (while preserving any other se
 {
   "statusLine": {
     "type": "command",
-    "command": "phosphorpulse render"
+    "command": "phosphorpulse render",
+    "refreshInterval": 1
   },
   "subagentStatusLine": {
     "type": "command",
@@ -104,6 +105,8 @@ Add these two blocks to `~/.claude/settings.json` (while preserving any other se
   }
 }
 ```
+
+`refreshInterval: 1` keeps time-based segments (pomodoro, clock, reset countdowns) ticking every second; a render costs about 0.7% of one core.
 
 ## 4. Migrate from phosphorflux
 

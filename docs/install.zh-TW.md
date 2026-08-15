@@ -96,7 +96,8 @@ Read this in: [English](install.md)
 {
   "statusLine": {
     "type": "command",
-    "command": "phosphorpulse render"
+    "command": "phosphorpulse render",
+    "refreshInterval": 1
   },
   "subagentStatusLine": {
     "type": "command",
@@ -104,6 +105,8 @@ Read this in: [English](install.md)
   }
 }
 ```
+
+`refreshInterval: 1` 讓時間型 segments（pomodoro、時鐘、重置倒數）每秒跳動；單次 render 約占單核 0.7%。
 
 ## 4. 從 phosphorflux 遷移
 

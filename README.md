@@ -31,7 +31,8 @@ Add these statusline entries to `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "phosphorpulse render"
+    "command": "phosphorpulse render",
+    "refreshInterval": 1
   },
   "subagentStatusLine": {
     "type": "command",
@@ -39,6 +40,8 @@ Add these statusline entries to `~/.claude/settings.json`:
   }
 }
 ```
+
+`refreshInterval: 1` keeps time-based segments (pomodoro, clock, reset countdowns) ticking every second; a render costs about 0.7% of one core.
 
 The TUI's **Settings & Install** screen, or the first-run setup wizard, can add these entries automatically. It shows a diff, asks for confirmation, and backs up the existing `settings.json` before writing.
 
