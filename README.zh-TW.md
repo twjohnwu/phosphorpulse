@@ -2,6 +2,7 @@
 
 [English](./README.md) | [繁體中文](./README.zh-TW.md)
 
+[![CI](https://github.com/twjohnwu/phosphorpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/twjohnwu/phosphorpulse/actions/workflows/ci.yml)
 [![Release](https://github.com/twjohnwu/phosphorpulse/actions/workflows/release.yml/badge.svg)](https://github.com/twjohnwu/phosphorpulse/actions)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
