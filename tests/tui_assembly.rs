@@ -625,6 +625,7 @@ fn partial_codex_config_defaults_draws_and_writes(contents: &str, draw_screens: 
 /// before deriving the atomic-write temporary-file directory.
 #[test]
 fn template_export_expands_literal_home_desktop_path() {
+    let _home_lock = HOME_LOCK.lock().expect("lock HOME for this process");
     let root = std::env::temp_dir().join(format!(
         "phosphorpulse-template-export-{}",
         std::process::id()
