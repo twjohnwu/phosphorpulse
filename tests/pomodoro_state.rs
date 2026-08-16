@@ -10,6 +10,9 @@ use std::{
 
 static TEMP_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
+// Notifications only fire on macOS (src/segments/pomodoro.rs gates on OS == "macos").
+const NOTIFIES: bool = cfg!(target_os = "macos");
+
 struct TempDir(PathBuf);
 
 impl TempDir {
@@ -194,10 +197,14 @@ fn test_s06_pomodoro_compat_and_notify() {
     let notify = run_render(&notify_config, &stub_bin, &counter, &stdin, now);
     assert!(notify.status.success(), "notify render failed: {:?}", String::from_utf8_lossy(&notify.stderr));
     assert!(String::from_utf8_lossy(&notify.stdout).contains("☕ 05:00"), "work-period boundary must render short-break mm:ss");
-    wait_for_counter_len(&counter, 1);
+    wait_for_counter_len(&counter, usize::from(NOTIFIES));
     let notified_state: serde_json::Value = serde_json::from_slice(&fs::read(notify_config.join("pomodoro/shared.json")).expect("read notified state")).expect("notified state must be JSON");
     assert_ts_persisted_schema(&notified_state);
-    assert_eq!(notified_state["lastNotifiedAtMs"].as_i64(), Some(now), "beyond 30 seconds must update lastNotifiedAtMs to now");
+    assert_eq!(
+        notified_state["lastNotifiedAtMs"].as_i64(),
+        Some(if NOTIFIES { now } else { now - 29_999 }),
+        "beyond 30 seconds must update lastNotifiedAtMs to now (macOS); unchanged where notifications do not fire"
+    );
 
     let invalid_config = temp.path().join("invalid-config");
     write_settings(&invalid_config);

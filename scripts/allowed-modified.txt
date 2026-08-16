@@ -17,3 +17,5 @@ tests/golden/pomodoro-odd/expected.bin
 tests/golden/width-stress/expected.bin
 src/segments/pomodoro.rs
 tests/stdin_edge.rs
+.github/workflows/ci.yml
+tests/pomodoro_state.rs
