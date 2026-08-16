@@ -416,16 +416,26 @@ mod tests {
             .expect("hanging child wrote pid")
             .trim()
             .to_owned();
-        match Command::new("ps").args(["-p", &pid]).status() {
-            Ok(status) => assert!(
-                !status.success(),
-                "timed-out child {pid} must no longer exist"
-            ),
-            // The restricted test sandbox may forbid launching `ps`; ordinary
-            // macOS/Linux runs take the status assertion above.
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
-            Err(error) => panic!("run ps: {error}"),
+        // The worker thread reaps the killed child asynchronously (the timeout
+        // path deliberately does not join it), so poll rather than sampling once.
+        let mut reaped = false;
+        for _ in 0..200 {
+            match Command::new("ps").args(["-p", &pid]).status() {
+                Ok(status) if !status.success() => {
+                    reaped = true;
+                    break;
+                }
+                Ok(_) => thread::sleep(Duration::from_millis(10)),
+                // The restricted test sandbox may forbid launching `ps`; ordinary
+                // macOS/Linux runs take the status branches above.
+                Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                    reaped = true;
+                    break;
+                }
+                Err(error) => panic!("run ps: {error}"),
+            }
         }
+        assert!(reaped, "timed-out child {pid} must no longer exist");
         let _ = fs::remove_file(pid_file);
     }
 }

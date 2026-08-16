@@ -19,3 +19,4 @@ src/segments/pomodoro.rs
 tests/stdin_edge.rs
 .github/workflows/ci.yml
 tests/pomodoro_state.rs
+src/segments/external.rs

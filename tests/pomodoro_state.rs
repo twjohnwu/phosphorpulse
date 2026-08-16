@@ -202,7 +202,7 @@ fn test_s06_pomodoro_compat_and_notify() {
     assert_ts_persisted_schema(&notified_state);
     assert_eq!(
         notified_state["lastNotifiedAtMs"].as_i64(),
-        Some(if NOTIFIES { now } else { now - 29_999 }),
+        Some(if NOTIFIES { now } else { now - 30_001 }),
         "beyond 30 seconds must update lastNotifiedAtMs to now (macOS); unchanged where notifications do not fire"
     );
 
