@@ -49,7 +49,7 @@ pub fn build_row(segments: &[String], layout: &str, width: usize, sep: &str) -> 
         .collect()
 }
 
-fn truncate_to_width(input: &str, width: usize) -> String {
+pub(crate) fn truncate_to_width(input: &str, width: usize) -> String {
     let bytes = input.as_bytes();
     let mut out = String::new();
     let mut used = 0;

@@ -8,7 +8,7 @@ use crate::tui::{
         Action, Screen,
         common::{
             ACCENT, ERROR, TEXT, areas, footer, footer_error, header, move_focus, preview,
-            too_small,
+            scrolled_list, too_small,
         },
     },
     settings_writer, templates_io,
@@ -37,10 +37,11 @@ pub struct TemplatesScreen;
 pub struct SettingsInstallScreen;
 pub struct SaveExitScreen;
 
-/// Frozen TS `listMainSegments()` order, including the `flex` pseudo-segment.
-const MAIN_SEGMENT_IDS: [&str; 14] = [
+/// The first 14 IDs keep the frozen TS `listMainSegments()` order; the last 4
+/// were added by the stdin-extra-segments change.
+const MAIN_SEGMENT_IDS: [&str; 18] = [
     "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node", "python", "version",
-    "cost", "burn", "pomodoro", "flex",
+    "cost", "burn", "pomodoro", "flex", "session", "fastMode", "outputStyle", "thinking",
 ];
 /// Frozen TS `listSubagentSegments()` inventory; picker choices must never be
 /// inferred from the main-line list.
@@ -168,7 +169,7 @@ enum ColorsFocus {
     DirPathDepth,
     NerdFont,
 }
-const COLORS_FOCUS: [ColorsFocus; 23] = [
+const COLORS_FOCUS: [ColorsFocus; 27] = [
     ColorsFocus::Depth,
     ColorsFocus::SegmentFg("model"),
     ColorsFocus::SegmentFg("effort"),
@@ -183,6 +184,10 @@ const COLORS_FOCUS: [ColorsFocus; 23] = [
     ColorsFocus::SegmentFg("cost"),
     ColorsFocus::SegmentFg("burn"),
     ColorsFocus::SegmentFg("pomodoro"),
+    ColorsFocus::SegmentFg("session"),
+    ColorsFocus::SegmentFg("fastMode"),
+    ColorsFocus::SegmentFg("outputStyle"),
+    ColorsFocus::SegmentFg("thinking"),
     ColorsFocus::GaugeWidth,
     ColorsFocus::GaugeWarnPct,
     ColorsFocus::GaugeHotPct,
@@ -193,6 +198,16 @@ const COLORS_FOCUS: [ColorsFocus; 23] = [
     ColorsFocus::DirPathDepth,
     ColorsFocus::NerdFont,
 ];
+const COLORS_SEPARATOR_BEFORE: [usize; 3] = [18, 24, 25];
+
+fn colors_line_index(focus: usize) -> usize {
+    focus
+        + COLORS_SEPARATOR_BEFORE
+            .iter()
+            .filter(|&&separator| separator <= focus)
+            .count()
+}
+
 macro_rules! simple_new {($($t:ident),*)=>{$(impl $t{pub fn new()->Self{Self}})*}}
 simple_new!(
     ColorsThemeScreen,
@@ -344,7 +359,11 @@ impl Screen for RowsSegmentsScreen {
                 .collect::<Vec<_>>()
                 .join("\n");
             header(f, a[0], &t(s.lang, &Key::CommonSegmentPicker, &[]));
-            f.render_widget(Paragraph::new(body).style(Style::default().fg(TEXT)), a[1]);
+            f.render_widget(
+                scrolled_list(body, s.selected(), options.len(), a[1])
+                    .style(Style::default().fg(TEXT)),
+                a[1],
+            );
             footer(
                 f,
                 a[2],
@@ -528,7 +547,8 @@ impl Screen for SubagentLineScreen {
             ..
         } = s.mode
         {
-            let body = SUBAGENT_SEGMENT_IDS
+            let options: &[&str] = &SUBAGENT_SEGMENT_IDS;
+            let body = options
                 .iter()
                 .enumerate()
                 .map(|(index, id)| {
@@ -537,7 +557,11 @@ impl Screen for SubagentLineScreen {
                 .collect::<Vec<_>>()
                 .join("\n");
             header(f, a[0], &t(s.lang, &Key::CommonSegmentPicker, &[]));
-            f.render_widget(Paragraph::new(body).style(Style::default().fg(TEXT)), a[1]);
+            f.render_widget(
+                scrolled_list(body, s.selected(), options.len(), a[1])
+                    .style(Style::default().fg(TEXT)),
+                a[1],
+            );
             footer(
                 f,
                 a[2],
@@ -669,7 +693,7 @@ impl Screen for ColorsThemeScreen {
         let selected = s.selected();
         let mut rows = Vec::new();
         for (index, focus) in COLORS_FOCUS.iter().enumerate() {
-            if index == 14 || index == 20 || index == 21 {
+            if COLORS_SEPARATOR_BEFORE.contains(&index) {
                 rows.push(Line::from(Span::styled(
                     "────────────────",
                     Style::default().fg(crate::tui::screens::common::DIM),
@@ -817,7 +841,16 @@ impl Screen for ColorsThemeScreen {
                 }
             });
         }
-        f.render_widget(Paragraph::new(rows).style(Style::default().fg(TEXT)), a[1]);
+        f.render_widget(
+            scrolled_list(
+                rows,
+                colors_line_index(selected),
+                COLORS_FOCUS.len() + COLORS_SEPARATOR_BEFORE.len(),
+                a[1],
+            )
+            .style(Style::default().fg(TEXT)),
+            a[1],
+        );
         footer(
             f,
             a[2],
@@ -1475,5 +1508,122 @@ impl Screen for SaveExitScreen {
             return Action::Quit;
         }
         Action::Redraw
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::themes::builtin;
+
+    /// REQ-04 / S-04: picker inventories include the new main IDs without changing built-in rows.
+    #[test]
+    fn test_s04_picker_ids_and_builtin_rows() {
+        assert_eq!(MAIN_SEGMENT_IDS.len(), 18);
+        assert_eq!(
+            &MAIN_SEGMENT_IDS[..14],
+            &[
+                "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node",
+                "python", "version", "cost", "burn", "pomodoro", "flex",
+            ]
+        );
+        assert_eq!(
+            MAIN_SEGMENT_IDS.get(14..),
+            Some(["session", "fastMode", "outputStyle", "thinking"].as_slice())
+        );
+        assert_eq!(
+            SUBAGENT_SEGMENT_IDS,
+            [
+                "name",
+                "desc",
+                "model",
+                "ctx",
+                "elapsed",
+                "effort",
+                "tokenCount",
+            ]
+        );
+
+        let new_ids = ["session", "fastMode", "outputStyle", "thinking"];
+        for theme_name in ["matrix-tron", "solarized-dark", "solarized-light"] {
+            let theme = builtin(theme_name);
+            assert!(theme.rows.iter().all(|row| row
+                .segments
+                .iter()
+                .all(|segment| !new_ids.contains(&segment.as_str()))));
+        }
+    }
+
+    /// REQ-07 / S-08: Colors & Themes lists the new segment foreground controls.
+    #[test]
+    fn test_s08_colors_focus_lists_new_segments() {
+        assert_eq!(COLORS_FOCUS.len(), 27);
+
+        let pomodoro = COLORS_FOCUS
+            .iter()
+            .position(|focus| matches!(focus, ColorsFocus::SegmentFg("pomodoro")))
+            .expect("pomodoro foreground focus");
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro + 1),
+            Some(ColorsFocus::SegmentFg("session"))
+        ));
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro + 2),
+            Some(ColorsFocus::SegmentFg("fastMode"))
+        ));
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro + 3),
+            Some(ColorsFocus::SegmentFg("outputStyle"))
+        ));
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro + 4),
+            Some(ColorsFocus::SegmentFg("thinking"))
+        ));
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro + 5),
+            Some(ColorsFocus::GaugeWidth)
+        ));
+        assert_eq!(COLORS_SEPARATOR_BEFORE, [18, 24, 25]);
+
+        let draft = crate::config::model::Config::defaults();
+        let theme = builtin("matrix-tron");
+        for (id, palette_key) in [
+            ("session", "dir"),
+            ("fastMode", "warn"),
+            ("outputStyle", "version"),
+            ("thinking", "warn"),
+        ] {
+            let actual = crate::tui::draft_ops::effective_segment_fg(&draft, id);
+            assert_eq!(actual.as_str(), theme.palette[palette_key].as_str());
+        }
+    }
+
+    /// REQ-08 / S-09: list scrolling keeps every selected item visible.
+    #[test]
+    fn test_s09_list_scroll_offsets() {
+        use crate::tui::screens::common::list_scroll_offset;
+
+        assert_eq!(list_scroll_offset(0, 18, 12), 0);
+        assert_eq!(list_scroll_offset(5, 18, 12), 0);
+        assert_eq!(list_scroll_offset(11, 18, 12), 0);
+        assert_eq!(list_scroll_offset(12, 18, 12), 1);
+        assert_eq!(list_scroll_offset(17, 18, 12), 6);
+        assert_eq!(list_scroll_offset(30, 18, 12), 6);
+        assert_eq!(list_scroll_offset(3, 5, 12), 0);
+        assert_eq!(list_scroll_offset(17, 18, 0), 0);
+
+        for (focus, expected) in [
+            (0, 0),
+            (17, 17),
+            (18, 19),
+            (19, 20),
+            (23, 24),
+            (24, 26),
+            (25, 28),
+            (26, 29),
+        ] {
+            assert_eq!(colors_line_index(focus), expected);
+        }
+        assert_eq!(COLORS_FOCUS.len() + COLORS_SEPARATOR_BEFORE.len(), 30);
     }
 }

@@ -20,3 +20,12 @@ tests/stdin_edge.rs
 .github/workflows/ci.yml
 tests/pomodoro_state.rs
 src/segments/external.rs
+src/protocol.rs
+src/render/row_builder.rs
+src/tui/screens/editor.rs
+scripts/test-fingerprints.txt
+scripts/allowed-modified.txt
+src/tui/preview.rs
+src/tui/draft_ops.rs
+src/tui/screens/common.rs
+tests/tui_preview.rs

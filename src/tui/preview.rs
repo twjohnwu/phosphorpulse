@@ -65,6 +65,10 @@ pub fn main_sample() -> Value {
         .as_secs() as i64;
     serde_json::json!({
         "session_id": "preview-sample",
+        "session_name": "phosphorpulse",
+        "fast_mode": true,
+        "thinking": { "enabled": false },
+        "output_style": { "name": "Concise" },
         "model": { "display_name": "Fable 5" },
         "effort": { "level": "medium" },
         "cwd": "~/example/project",

@@ -130,6 +130,10 @@ fn segment(
             fg: Some(value.fg),
             bold: false,
         }),
+        "session" => simple::session(c),
+        "fastMode" => simple::fast_mode(c),
+        "outputStyle" => simple::output_style(c),
+        "thinking" => simple::thinking(c),
         _ => None,
     }
 }

@@ -2,8 +2,33 @@ use crate::{
     clock,
     jsx::number::to_fixed_2,
     protocol::{RenderContext, Window},
+    render::row_builder::truncate_to_width,
 };
+use crate::jsx::width::display_width;
 pub const DIM: &str = "\0text-dim\0";
+const MAX_STATUS_WIDTH: usize = 24;
+
+struct StatusText {
+    session_prefix: &'static str,
+    fast: &'static str,
+    output_style_prefix: &'static str,
+    thinking: &'static str,
+}
+
+const STATUS_TEXT: [StatusText; 2] = [
+    StatusText {
+        session_prefix: "#",
+        fast: "fast",
+        output_style_prefix: "style:",
+        thinking: "no-think",
+    },
+    StatusText {
+        session_prefix: "\u{f02b} ",
+        fast: "\u{f0e7} fast",
+        output_style_prefix: "\u{f1fc} ",
+        thinking: "\u{f05e} think",
+    },
+];
 #[derive(Clone, Debug)]
 pub struct Segment {
     pub text: String,
@@ -133,6 +158,54 @@ pub fn version(c: &RenderContext) -> Option<Segment> {
     c.version.as_ref().map(|v| Segment {
         text: format!("v{v}"),
         fg: Some("version"),
+        bold: false,
+    })
+}
+fn status_text(c: &RenderContext) -> &'static StatusText {
+    &STATUS_TEXT[usize::from(c.nerd_font)]
+}
+fn cap_status_text(prefix: &str, value: &str) -> String {
+    let full = format!("{prefix}{value}");
+    if display_width(&full) <= MAX_STATUS_WIDTH {
+        full
+    } else {
+        format!(
+            "{prefix}{}…",
+            truncate_to_width(
+                value,
+                MAX_STATUS_WIDTH - display_width(prefix) - 1,
+            )
+        )
+    }
+}
+pub fn session(c: &RenderContext) -> Option<Segment> {
+    c.session_name.as_ref().map(|name| Segment {
+        text: cap_status_text(status_text(c).session_prefix, name),
+        fg: Some("dir"),
+        bold: false,
+    })
+}
+pub fn fast_mode(c: &RenderContext) -> Option<Segment> {
+    (c.fast_mode == Some(true)).then(|| Segment {
+        text: status_text(c).fast.to_owned(),
+        fg: Some("warn"),
+        bold: false,
+    })
+}
+pub fn output_style(c: &RenderContext) -> Option<Segment> {
+    c.output_style
+        .as_ref()
+        .filter(|name| name.as_str() != "default")
+        .map(|name| Segment {
+            text: cap_status_text(status_text(c).output_style_prefix, name),
+            fg: Some("version"),
+            bold: false,
+        })
+}
+pub fn thinking(c: &RenderContext) -> Option<Segment> {
+    (c.thinking_enabled == Some(false)).then(|| Segment {
+        text: status_text(c).thinking.to_owned(),
+        fg: Some("warn"),
         bold: false,
     })
 }

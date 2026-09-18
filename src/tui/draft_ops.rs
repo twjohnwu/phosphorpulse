@@ -150,6 +150,9 @@ fn effective_fg(draft: &Config, segment: &str) -> String {
         "version" => "#969696",
         "cost" | "burn" => "#008F11",
         "clock" => "#003232",
+        "session" => "#00CF41",
+        "outputStyle" => "#969696",
+        "fastMode" | "thinking" => "#FF7F50",
         value => value,
     };
     effective.into()

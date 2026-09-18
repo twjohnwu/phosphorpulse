@@ -1,0 +1,12 @@
+{
+  "activeTemplate": "matrix-tron",
+  "colorDepth": "auto",
+  "nerdFont": true,
+  "rows": [
+    { "layout": "auto", "segments": ["model", "session", "fastMode", "outputStyle", "thinking", "flex", "ctx"] },
+    { "layout": "auto", "segments": ["limit5h", "pomodoro", "node", "flex", "burn", "version", "limit7d"] }
+  ],
+  "subagent": { "segments": ["name", "desc", "model", "effort", "ctx", "elapsed"] },
+  "gauge": { "barWidth": 20, "warnPct": 65, "hotPct": 85 },
+  "segments": { "dir": { "pathDepth": 99 } }
+}

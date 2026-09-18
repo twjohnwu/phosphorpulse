@@ -32,6 +32,8 @@ pub fn resolve_subagent_role_name(task: &Value, transcript_path: Option<&str>) -
 pub struct Window { pub used_percentage: Option<f64>, pub resets_at: Option<i64> }
 #[derive(Clone, Debug, Default)]
 pub struct RenderContext {
+    pub session_name: Option<String>, pub fast_mode: Option<bool>, pub thinking_enabled: Option<bool>,
+    pub output_style: Option<String>, pub nerd_font: bool,
     pub model_display_name: Option<String>, pub effort_level: Option<String>, pub cwd: Option<String>,
     pub path_depth: usize, pub version: Option<String>, pub session_id: Option<String>,
     pub context_used_percentage: Option<f64>, pub total_input_tokens: Option<f64>, pub total_output_tokens: Option<f64>,
@@ -48,6 +50,18 @@ fn reset(v: Option<&Value>) -> Option<i64> {
   Value::String(s) if !s.is_empty() => s.parse::<i64>().ok().map(|x| x * 1000).or_else(|| parse_iso_millis(s)),
   _ => None,
  }
+}
+fn clean_text(s: Option<&str>) -> Option<String> {
+ let cleaned: String = s?.chars().filter(|c| {
+  !c.is_control()
+   && !matches!(*c,
+    '\u{2028}' | '\u{2029}' |
+    '\u{061C}' | '\u{200E}' | '\u{200F}' |
+    '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+   )
+ }).collect();
+ let trimmed=cleaned.trim();
+ (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 // Date.parse-compatible enough for the ISO timestamps emitted by Claude Code.
 fn parse_iso_millis(s: &str) -> Option<i64> {
@@ -71,7 +85,7 @@ impl RenderContext {
   let get = |p: &[&str]| -> Option<&Value> { let mut x=raw; for k in p { x=x.get(*k)?; } Some(x) };
   let cfg = |p: &[&str]| -> Option<&Value> { let mut x=config?; for k in p { x=x.get(*k)?; } Some(x) };
   let win = |name| Window { used_percentage:num(get(&["rate_limits",name,"used_percentage"])), resets_at:reset(get(&["rate_limits",name,"resets_at"])) };
-  Self { model_display_name:get(&["model","display_name"]).and_then(Value::as_str).map(str::to_owned), effort_level:get(&["effort","level"]).and_then(Value::as_str).map(str::to_owned), cwd:get(&["cwd"]).or_else(||get(&["workspace","current_dir"])).and_then(Value::as_str).map(str::to_owned), path_depth:num(cfg(&["segments","dir","pathDepth"])).map(|n|n as usize).unwrap_or(99), version:get(&["version"]).and_then(Value::as_str).map(str::to_owned), session_id:get(&["session_id"]).and_then(Value::as_str).map(str::to_owned), context_used_percentage:num(get(&["context_window","used_percentage"])), total_input_tokens:num(get(&["context_window","total_input_tokens"])), total_output_tokens:num(get(&["context_window","total_output_tokens"])), cache_read_input_tokens:num(get(&["context_window","current_usage","cache_read_input_tokens"])), cache_creation_input_tokens:num(get(&["context_window","current_usage","cache_creation_input_tokens"])), five_hour:win("five_hour"), seven_day:win("seven_day"), total_cost_usd:num(get(&["cost","total_cost_usd"])), total_duration_ms:num(get(&["cost","total_duration_ms"])), gauge_width:num(cfg(&["gauge","barWidth"])).map(|n|n as usize).unwrap_or(20), warn_pct:num(cfg(&["gauge","warnPct"])).unwrap_or(65.), hot_pct:num(cfg(&["gauge","hotPct"])).unwrap_or(85.) }
+  Self { session_name:clean_text(get(&["session_name"]).and_then(Value::as_str)), fast_mode:get(&["fast_mode"]).and_then(Value::as_bool), thinking_enabled:get(&["thinking","enabled"]).and_then(Value::as_bool), output_style:clean_text(get(&["output_style","name"]).and_then(Value::as_str)), nerd_font:cfg(&["nerdFont"]).and_then(Value::as_bool).unwrap_or(false), model_display_name:get(&["model","display_name"]).and_then(Value::as_str).map(str::to_owned), effort_level:get(&["effort","level"]).and_then(Value::as_str).map(str::to_owned), cwd:get(&["cwd"]).or_else(||get(&["workspace","current_dir"])).and_then(Value::as_str).map(str::to_owned), path_depth:num(cfg(&["segments","dir","pathDepth"])).map(|n|n as usize).unwrap_or(99), version:get(&["version"]).and_then(Value::as_str).map(str::to_owned), session_id:get(&["session_id"]).and_then(Value::as_str).map(str::to_owned), context_used_percentage:num(get(&["context_window","used_percentage"])), total_input_tokens:num(get(&["context_window","total_input_tokens"])), total_output_tokens:num(get(&["context_window","total_output_tokens"])), cache_read_input_tokens:num(get(&["context_window","current_usage","cache_read_input_tokens"])), cache_creation_input_tokens:num(get(&["context_window","current_usage","cache_creation_input_tokens"])), five_hour:win("five_hour"), seven_day:win("seven_day"), total_cost_usd:num(get(&["cost","total_cost_usd"])), total_duration_ms:num(get(&["cost","total_duration_ms"])), gauge_width:num(cfg(&["gauge","barWidth"])).map(|n|n as usize).unwrap_or(20), warn_pct:num(cfg(&["gauge","warnPct"])).unwrap_or(65.), hot_pct:num(cfg(&["gauge","hotPct"])).unwrap_or(85.) }
  }
 }
 pub fn read_stdin_json() -> Result<Value, String> { let mut input=Vec::new(); io::stdin().read_to_end(&mut input).map_err(|e|format!("cannot read stdin: {e}"))?; serde_json::from_slice(&input).map_err(|e|e.to_string()) }

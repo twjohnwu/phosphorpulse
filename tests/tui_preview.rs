@@ -191,3 +191,108 @@ fn test_s17_preview_isolation() {
         "repeated synchronous preview renders are deterministic"
     );
 }
+
+/// REQ-06 / S-07
+/// GIVEN `preview::main_sample()`；draft config 以 `Config::defaults()` 為底，`rows[0].segments` 為 `["model","session","fastMode","outputStyle","thinking"]`，分別測 `nerdFont:true` 與缺鍵；暫存 config_dir
+/// WHEN 呼叫 `render_value_preview_at_columns(sample, draft, config_dir, 120)`，測試端移除 ANSI
+/// THEN 第一行依序包含（nerd）`\u{f02b} phosphorpulse`、`\u{f0e7} fast`、`\u{f1fc} Concise`、`\u{f05e} think`；（ascii）`#phosphorpulse`、`fast`、`style:Concise`、`no-think`；且 `main_sample()` 的 `session_id`、`model`、`effort`、`cwd`、`version`、`context_window`、`rate_limits`、`cost` 八個鍵仍存在
+#[test]
+fn test_s07_preview_sample_shows_extra_segments() {
+    fn strip_ansi(input: &str) -> String {
+        let bytes = input.as_bytes();
+        let mut plain = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+
+        while index < bytes.len() {
+            if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'[') {
+                index += 2;
+                while index < bytes.len() {
+                    let byte = bytes[index];
+                    index += 1;
+                    if (0x40..=0x7e).contains(&byte) {
+                        break;
+                    }
+                }
+            } else {
+                plain.push(bytes[index]);
+                index += 1;
+            }
+        }
+
+        String::from_utf8(plain).expect("stripping ANSI preserves UTF-8")
+    }
+
+    fn assert_contains_in_order(line: &str, expected: &[&str]) {
+        let mut remaining = line;
+        for needle in expected {
+            assert!(
+                remaining.contains(needle),
+                "first line should contain {needle:?} in order: {line:?}"
+            );
+            let offset = remaining
+                .find(needle)
+                .expect("contains assertion establishes the match");
+            remaining = &remaining[offset + needle.len()..];
+        }
+    }
+
+    let temp = TempDir::new("s07-preview-extra-segments");
+    let home = temp.path().join("home");
+    let config_dir = temp.path().join("config");
+    fs::create_dir_all(&home).expect("create temporary home");
+    fs::create_dir_all(&config_dir).expect("create temporary config directory");
+    let _environment = EnvGuard::use_temp_home(&home);
+
+    let sample = phosphorpulse::tui::preview::main_sample();
+    for key in [
+        "session_id",
+        "model",
+        "effort",
+        "cwd",
+        "version",
+        "context_window",
+        "rate_limits",
+        "cost",
+    ] {
+        assert!(sample.get(key).is_some(), "main_sample keeps {key}");
+    }
+
+    let mut draft = serde_json::to_value(Config::defaults()).expect("serialize default config");
+    draft["rows"] = json!([{
+        "layout": "fixed",
+        "segments": ["model", "session", "fastMode", "outputStyle", "thinking"]
+    }]);
+
+    let mut nerd_draft = draft.clone();
+    nerd_draft["nerdFont"] = json!(true);
+    let nerd = phosphorpulse::render::render_value_preview_at_columns(
+        sample.clone(),
+        nerd_draft,
+        config_dir.clone(),
+        120,
+    );
+    let nerd_plain = strip_ansi(&nerd);
+    let nerd_first_line = nerd_plain.lines().next().unwrap_or_default();
+    assert_contains_in_order(
+        nerd_first_line,
+        &[
+            "\u{f02b} phosphorpulse",
+            "\u{f0e7} fast",
+            "\u{f1fc} Concise",
+            "\u{f05e} think",
+        ],
+    );
+
+    let ascii = phosphorpulse::render::render_value_preview_at_columns(
+        sample,
+        draft,
+        config_dir,
+        120,
+    );
+    let ascii_plain = strip_ansi(&ascii);
+    let ascii_first_line = ascii_plain.lines().next().unwrap_or_default();
+    assert_contains_in_order(
+        ascii_first_line,
+        &["#phosphorpulse", "fast", "style:Concise", "no-think"],
+    );
+}

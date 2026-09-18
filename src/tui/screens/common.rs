@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -113,6 +113,30 @@ pub fn preview(frame: &mut Frame, area: Rect, state: &AppState) {
             .style(Style::default().fg(TEXT)),
         area,
     );
+}
+
+pub(crate) fn list_scroll_offset(
+    selected_line: usize,
+    total_lines: usize,
+    visible: usize,
+) -> usize {
+    if visible == 0 || total_lines <= visible {
+        0
+    } else {
+        selected_line
+            .saturating_sub(visible - 1)
+            .min(total_lines - visible)
+    }
+}
+
+pub(crate) fn scrolled_list<'a>(
+    body: impl Into<Text<'a>>,
+    selected_line: usize,
+    total_lines: usize,
+    area: Rect,
+) -> Paragraph<'a> {
+    let offset = list_scroll_offset(selected_line, total_lines, area.height as usize);
+    Paragraph::new(body).scroll((offset as u16, 0))
 }
 
 pub fn move_focus(state: &mut AppState, len: usize, delta: i8) {
