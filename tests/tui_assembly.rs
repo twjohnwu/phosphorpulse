@@ -23,6 +23,7 @@ mod config_io;
 mod templates_io;
 
 static HOME_LOCK: Mutex<()> = Mutex::new(());
+static TEMP_DIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new_with_kind(code, KeyModifiers::NONE, KeyEventKind::Press)
@@ -30,12 +31,13 @@ fn press(code: KeyCode) -> KeyEvent {
 
 fn with_completely_empty_home(test: impl FnOnce(&std::path::Path)) {
     let root = std::env::temp_dir().join(format!(
-        "phosphorpulse-fresh-home-{}-{}",
+        "phosphorpulse-fresh-home-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
-            .as_nanos()
+            .as_nanos(),
+        TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     let old_home = std::env::var_os("HOME");
     let old_path = std::env::var_os("PATH");
@@ -379,12 +381,13 @@ fn router_dispatches_all_three_start_states() {
 
 fn with_temp_home(settings: Option<serde_json::Value>, test: impl FnOnce(&std::path::Path)) {
     let root = std::env::temp_dir().join(format!(
-        "phosphorpulse-router-{}-{}",
+        "phosphorpulse-router-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
-            .as_nanos()
+            .as_nanos(),
+        TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(root.join(".claude/phosphorpulse")).expect("create config dir");
     std::fs::write(
