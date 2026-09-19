@@ -76,12 +76,12 @@ pub fn main_sample() -> Value {
         "cwd": "~/example/project",
         "version": "2.1.220",
         "context_window": {
-            "used_percentage": 65,
-            "total_input_tokens": 650_000,
-            "total_output_tokens": 1_900,
+            "used_percentage": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
             "current_usage": {
-                "cache_read_input_tokens": 620_000,
-                "cache_creation_input_tokens": 360
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
             }
         },
         "rate_limits": {
