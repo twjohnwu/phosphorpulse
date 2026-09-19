@@ -14,6 +14,9 @@ pub fn render_preview(draft: &Config, main_sample: Value, subagent_sample: Value
     render_preview_at_columns(draft, main_sample, subagent_sample, 80)
 }
 
+/// Left/right padding (in cells) applied to every preview line.
+const PREVIEW_GUTTER: usize = 2;
+
 /// Renders the fixed PreviewPane samples at the preview widget's real width.
 pub fn render_preview_at_columns(
     draft: &Config,
@@ -22,12 +25,21 @@ pub fn render_preview_at_columns(
     columns: usize,
 ) -> String {
     let config_dir = preview_config_dir();
-    let mut rendered = phosphorpulse::render::render_value_preview_at_columns(
+    // Claude Code draws the status line inside a 2-cell gutter on both sides;
+    // mirror it so the preview does not hug the pane border.
+    let main_rendered = phosphorpulse::render::render_value_preview_at_columns(
         main_sample,
         Value::Object(draft.0.clone()),
         config_dir,
-        columns,
+        columns.saturating_sub(2 * PREVIEW_GUTTER).max(1),
     );
+    let gutter = " ".repeat(PREVIEW_GUTTER);
+    let mut rendered = String::new();
+    for line in main_rendered.lines() {
+        rendered.push_str(&gutter);
+        rendered.push_str(line);
+        rendered.push('\n');
+    }
     // Match PreviewPane.tsx: render the configured subagent segments through
     // the real subagent renderer, then prefix its first JSONL record.
     let subagent_rendered = phosphorpulse::render::render_subagent_value(
@@ -45,7 +57,9 @@ pub fn render_preview_at_columns(
         })
     {
         rendered.push('\n');
+        rendered.push_str(&gutter);
         rendered.push_str("\x1b[1m● main\x1b[0m\n");
+        rendered.push_str(&gutter);
         rendered.push_str("○ ");
         rendered.push_str(content.trim());
         rendered.push('\n');
@@ -76,12 +90,12 @@ pub fn main_sample() -> Value {
         "cwd": "~/example/project",
         "version": "2.1.220",
         "context_window": {
-            "used_percentage": 0,
-            "total_input_tokens": 0,
-            "total_output_tokens": 0,
+            "used_percentage": 10,
+            "total_input_tokens": 20_000,
+            "total_output_tokens": 1_200,
             "current_usage": {
-                "cache_read_input_tokens": 0,
-                "cache_creation_input_tokens": 0
+                "cache_read_input_tokens": 18_500,
+                "cache_creation_input_tokens": 900
             }
         },
         "rate_limits": {

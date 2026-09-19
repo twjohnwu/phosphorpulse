@@ -224,8 +224,8 @@ fn render_value_at(
         ),
         RenderMode::Preview => external::Values {
             git: need_git.then(|| "preview-git".into()),
-            node: need_node.then(|| "preview-node".into()),
-            python: need_python.then(|| "preview-python".into()),
+            node: need_node.then(|| "node:24.18.1".into()),
+            python: need_python.then(|| "py:3.13.7".into()),
         },
     };
     let needs_pomodoro = row_segments.iter().flatten().any(|id| *id == "pomodoro");
