@@ -1,8 +1,8 @@
 //! `cmd-refresh`'s command-execution variant, relocated out of
 //! `segments/external.rs` (that module's guard test forbids `/bin/kill` appearing there —
 //! `tests/review_fixes.rs::test_timeout_kill_is_cross_platform`). Zero behavior change from
-//! the original; the unix-only pieces (`process_group`, `/bin/kill`) are `#[cfg(unix)]`-gated
-//! with a `child.kill()` fallback for other platforms.
+//! the original; the unix-only pieces (`process_group`, `libc::killpg`) are
+//! `#[cfg(unix)]`-gated with a `child.kill()` fallback for other platforms.
 
 use std::{
     io::{Read, Write},
@@ -27,23 +27,31 @@ const STDOUT_CAP_BYTES: usize = 65_536;
 /// diagnostic string.
 const STDERR_CAP_BYTES: usize = 4 * 1024;
 
-/// Kills the whole process group of `child` via `/bin/kill -9 -<pgid>` (absolute path,
-/// no PATH dependency), falling back to `child.kill()` (direct child only) if `/bin/kill`
-/// itself cannot be spawned. Only acts while the shared handle is still `Some`, mirroring
-/// the timeout guard above so a reused pid is never mis-killed. Non-unix platforms have no
-/// process group to target, so they always fall back to `child.kill()`.
+/// Kills the whole process group of `child` via `libc::killpg` (pgid = `child.id()`,
+/// set by `process_group(0)` at spawn time), falling back to `child.kill()` (direct
+/// child only) if `killpg` itself reports failure. Only acts while the shared handle is
+/// still `Some`, mirroring the timeout guard above so a reused pid is never mis-killed.
+/// Non-unix platforms have no process group to target, so they always fall back to
+/// `child.kill()`.
+///
+/// Was previously implemented by shelling out to `/bin/kill -9 -<pgid>` and checking only
+/// whether that command could be *spawned*, not its exit status. On Linux CI
+/// (`ubuntu-latest`, procps-ng 4.0.4's `kill`), that invocation spawns fine but exits
+/// nonzero — `kill -9 -<pgid>` without a `--` separator fails to parse the negative pgid
+/// as an argument (`kill: failed to parse argument: '(null)'`), so the group was never
+/// actually killed and the swallowed nonzero exit made the caller believe otherwise.
+/// macOS's BSD `kill` parses the same invocation without complaint, which is why this was
+/// never observed there. `killpg` sidesteps CLI argument parsing entirely and its
+/// success/failure is checked directly.
 fn kill_process_group(child: &Arc<Mutex<Option<std::process::Child>>>) {
     if let Some(child) = child.lock().expect("child handle poisoned").as_mut() {
         #[cfg(unix)]
         {
             let pgid = child.id();
-            if Command::new("/bin/kill")
-                .args(["-9", &format!("-{pgid}")])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_err()
-            {
+            // SAFETY: `pgid` is a real process/group id obtained from `child.id()`;
+            // `killpg` takes no pointers and cannot invalidate Rust-side state.
+            let killed = unsafe { libc::killpg(pgid as libc::pid_t, libc::SIGKILL) };
+            if killed != 0 {
                 let _ = child.kill();
             }
         }
