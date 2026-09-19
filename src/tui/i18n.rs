@@ -106,6 +106,9 @@ message_table! {
     TemplatesHintBackToMenu => ("templates.hintBackToMenu", "[Esc/Enter] back to menu", "[Esc/Enter] 返回選單"),
     ColorsDepth => ("colors.depth", "Color depth: {depth}", "色深: {depth}"),
     ColorsHintCycleAdjust => ("colors.hintCycleAdjust", "[←/→] cycle/adjust", "[←/→] 循環/調整"),
+    ColorsHintCmdAddKey => ("colors.hintCmdAddKey", "[a] add", "[a] 新增"),
+    ColorsHintCmdDeleteKey => ("colors.hintCmdDeleteKey", "[d] delete", "[d] 刪除"),
+    ColorsHintCmdEditKey => ("colors.hintCmdEditKey", "[Enter] edit", "[Enter] 編輯"),
     ColorsGaugeWidth => ("colors.gaugeWidth", "gauge width: {value}", "gauge 寬度: {value}"),
     ColorsGaugeWarnPct => ("colors.gaugeWarnPct", "gauge warn%: {value}", "gauge 警告%: {value}"),
     ColorsGaugeHotPct => ("colors.gaugeHotPct", "gauge hot%: {value}", "gauge 危險%: {value}"),
@@ -114,6 +117,20 @@ message_table! {
     ColorsNerdFont => ("colors.nerdFont", "Nerd Font: {value}", "Nerd Font: {value}"),
     ColorsNerdFontOn => ("colors.nerdFontOn", "on", "開"),
     ColorsNerdFontOff => ("colors.nerdFontOff", "off", "關"),
+    ColorsCmdCommand => ("colors.cmdCommand", "command: {value}", "command: {value}"),
+    ColorsCmdTimeoutMs => ("colors.cmdTimeoutMs", "timeoutMs: {value}", "timeoutMs: {value}"),
+    ColorsCmdTtlSec => ("colors.cmdTtlSec", "ttlSec: {value}", "ttlSec: {value}"),
+    ColorsCmdMaxWidth => ("colors.cmdMaxWidth", "maxWidth: {value}", "maxWidth: {value}"),
+    ColorsCmdPreserveColors => ("colors.cmdPreserveColors", "preserveColors: {value}", "preserveColors: {value}"),
+    ColorsCmdAdd => ("colors.cmdAdd", "[a] add command", "[a] 新增指令"),
+    ColorsCmdEmpty => ("colors.cmdEmpty", "No custom commands — [a] add", "尚無自訂指令 — [a] 新增"),
+    ColorsHintCmdName => ("colors.hintCmdName", "Command name (Enter to continue, Esc to cancel)", "指令名稱（Enter 繼續，Esc 取消）"),
+    ColorsHintCmdCommand => ("colors.hintCmdCommand", "Shell command (Enter to save, Esc to cancel)", "Shell 指令（Enter 儲存，Esc 取消）"),
+    ColorsHintCmdEdit => ("colors.hintCmdEdit", "Edit command (Enter to save, Esc to cancel)", "編輯指令（Enter 儲存，Esc 取消）"),
+    ColorsHintCmdDelete => ("colors.hintCmdDelete", "[y] delete cmd:{name}  [any key] cancel", "[y] 刪除 cmd:{name}  [任意鍵] 取消"),
+    ColorsHintCmdRemovedRows => ("colors.hintCmdRemovedRows", "removed from {count} rows", "已從 {count} 列移除"),
+    ColorsCmdNameInvalid => ("colors.cmdNameInvalid", "name must match [A-Za-z0-9_-]{1,32} and be unique", "名稱必須符合 [A-Za-z0-9_-]{1,32} 且不得重複"),
+    ColorsCmdCommandEmpty => ("colors.cmdCommandEmpty", "command must not be empty", "指令不得為空"),
     MainMenuLanguage => ("mainMenu.language", "Language: {value}", "語言: {value}"),
     MainMenuHintMove => ("mainMenu.hintMove", "[↑/↓] move", "[↑/↓] 移動"),
     MainMenuHintOpen => ("mainMenu.hintOpen", "[Enter] open", "[Enter] 開啟"),
@@ -234,4 +251,36 @@ pub fn t(lang: Lang, key: &Key, params: &[(&str, &str)]) -> String {
 
     rendered.push_str(remaining);
     rendered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Key, Lang, all_keys, t};
+
+    /// REQ-04 / S-09
+    #[test]
+    fn test_s09_cmd_keys_both_langs() {
+        let keys = [
+            Key::ColorsCmdCommand,
+            Key::ColorsCmdTimeoutMs,
+            Key::ColorsCmdTtlSec,
+            Key::ColorsCmdMaxWidth,
+            Key::ColorsCmdPreserveColors,
+            Key::ColorsCmdAdd,
+            Key::ColorsCmdEmpty,
+            Key::ColorsHintCmdName,
+            Key::ColorsHintCmdCommand,
+            Key::ColorsHintCmdEdit,
+            Key::ColorsHintCmdDelete,
+            Key::ColorsHintCmdRemovedRows,
+            Key::ColorsCmdNameInvalid,
+            Key::ColorsCmdCommandEmpty,
+        ];
+
+        for key in keys {
+            assert!(!t(Lang::En, &key, &[]).is_empty());
+            assert!(!t(Lang::ZhTw, &key, &[]).is_empty());
+            assert!(all_keys().contains(&key));
+        }
+    }
 }

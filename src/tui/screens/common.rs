@@ -7,15 +7,53 @@ use crate::tui::{
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
+use unicode_segmentation::UnicodeSegmentation;
+
+use phosphorpulse::jsx::width::display_width;
 
 pub const ACCENT: Color = Color::Rgb(0, 255, 65);
 pub const TEXT: Color = Color::Rgb(0, 207, 65);
 pub const DIM: Color = Color::Rgb(0, 143, 17);
 pub const ERROR: Color = Color::Rgb(255, 55, 55);
+
+pub fn input_line(
+    prompt: &str,
+    input: &str,
+    width: u16,
+) -> Vec<ratatui::text::Line<'static>> {
+    let graphemes = input.graphemes(true).collect::<Vec<_>>();
+    let available = usize::from(width).saturating_sub(1);
+    let mut start = graphemes.len();
+    let mut used = 0;
+    while start > 0 {
+        let grapheme_width = display_width(graphemes[start - 1]);
+        if used + grapheme_width > available {
+            break;
+        }
+        used += grapheme_width;
+        start -= 1;
+    }
+    let visible = graphemes[start..].concat();
+    vec![
+        Line::from(Span::styled(
+            prompt.to_owned(),
+            Style::default().fg(DIM),
+        )),
+        Line::from(vec![
+            Span::styled(visible, Style::default().fg(TEXT)),
+            Span::styled(
+                " ",
+                Style::default()
+                    .fg(TEXT)
+                    .add_modifier(Modifier::REVERSED),
+            ),
+        ]),
+    ]
+}
 
 pub fn areas(frame: &Frame, state: &AppState) -> Option<[Rect; 4]> {
     let area = frame.area();

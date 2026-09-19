@@ -117,6 +117,116 @@ fn object_field<'a>(object: &'a mut Map<String, Value>, key: &str) -> &'a mut Ma
     }
 }
 
+fn command_object_mut<'a>(draft: &'a mut Config, name: &str) -> Option<&'a mut Map<String, Value>> {
+    draft
+        .0
+        .get_mut("commands")?
+        .as_object_mut()?
+        .get_mut(name)?
+        .as_object_mut()
+}
+
+pub fn command_field_i64(draft: &Config, name: &str, key: &str, default: i64) -> i64 {
+    draft
+        .0
+        .get("commands")
+        .and_then(Value::as_object)
+        .and_then(|commands| commands.get(name))
+        .and_then(Value::as_object)
+        .and_then(|command| command.get(key))
+        .and_then(Value::as_i64)
+        .unwrap_or(default)
+}
+
+pub fn adjust_command_int(
+    draft: &Config,
+    name: &str,
+    key: &str,
+    default: i64,
+    delta: i64,
+    min: i64,
+    max: i64,
+    direction: i8,
+) -> Config {
+    let mut next = draft.clone();
+    if direction == 0 {
+        return next;
+    }
+    let Some(command) = command_object_mut(&mut next, name) else {
+        return next;
+    };
+    let current = command.get(key).and_then(Value::as_i64).unwrap_or(default);
+    command.insert(
+        key.into(),
+        Value::from(clamp(
+            current + delta * i64::from(direction),
+            min,
+            max,
+        )),
+    );
+    next
+}
+
+pub fn toggle_command_bool(draft: &Config, name: &str, key: &str, default: bool) -> Config {
+    let mut next = draft.clone();
+    let Some(command) = command_object_mut(&mut next, name) else {
+        return next;
+    };
+    let current = command
+        .get(key)
+        .and_then(Value::as_bool)
+        .unwrap_or(default);
+    command.insert(key.into(), Value::Bool(!current));
+    next
+}
+
+pub fn set_command_string(draft: &Config, name: &str, command: &str) -> Config {
+    let mut next = draft.clone();
+    let Some(command_object) = command_object_mut(&mut next, name) else {
+        return next;
+    };
+    command_object.insert("command".into(), Value::String(command.into()));
+    next
+}
+
+pub fn add_command(draft: &Config, name: &str, command: &str) -> Config {
+    let mut next = draft.clone();
+    let commands = object_field(&mut next.0, "commands");
+    commands.insert(
+        name.into(),
+        Value::Object(Map::from_iter([(
+            "command".into(),
+            Value::String(command.into()),
+        )])),
+    );
+    next
+}
+
+pub fn remove_command(draft: &Config, name: &str) -> (Config, usize) {
+    let mut next = draft.clone();
+    if let Some(commands) = next.0.get_mut("commands").and_then(Value::as_object_mut) {
+        commands.remove(name);
+    }
+    let segment_id = format!("cmd:{name}");
+    if let Some(segments) = next.0.get_mut("segments").and_then(Value::as_object_mut) {
+        segments.remove(&segment_id);
+    }
+    let mut affected_rows = 0;
+    if let Some(rows) = next.0.get_mut("rows").and_then(Value::as_array_mut) {
+        for row in rows {
+            let Some(segments) = row.get_mut("segments").and_then(Value::as_array_mut) else {
+                continue;
+            };
+            let previous_len = segments.len();
+            segments.retain(|segment| segment.as_str() != Some(&segment_id));
+            if segments.len() != previous_len {
+                affected_rows += 1;
+            }
+        }
+    }
+    (next, affected_rows)
+}
+
 fn array_at_row(draft: &mut Config, row: usize) -> Option<&mut Vec<Value>> {
     let rows = draft.0.get_mut("rows")?.as_array_mut()?;
     rows.get_mut(row)?.get_mut("segments")?.as_array_mut()
@@ -153,9 +263,13 @@ fn effective_fg(draft: &Config, segment: &str) -> String {
         "session" => "#00CF41",
         "outputStyle" => "#969696",
         "fastMode" | "thinking" => "#FF7F50",
+        id if id.starts_with("cmd:") => "text",
         value => value,
     };
-    effective.into()
+    match effective {
+        "text" => "#00FF41".into(),
+        value => value.into(),
+    }
 }
 
 pub fn add_row(draft: &Config, segments: Vec<String>) -> Config {

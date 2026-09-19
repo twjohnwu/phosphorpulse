@@ -1,7 +1,7 @@
 pub mod row_builder;
 pub mod themes;
 use crate::{
-    config,
+    cmd, config,
     protocol::RenderContext,
     segments::{
         external, pomodoro,
@@ -69,7 +69,11 @@ fn palette_color<'a>(value: &'a str, t: &'a Theme) -> &'a str {
     }
 }
 fn wrap(id: &str, s: Segment, row: Option<&Value>, cfg: &Value, t: &Theme, d: &str) -> String {
-    let fg = configured_color(id, row, cfg, "fg").or(s.fg);
+    let fg = if id.starts_with("cmd:") && s.fg == Some("text.dim") {
+        s.fg
+    } else {
+        configured_color(id, row, cfg, "fg").or(s.fg)
+    };
     let bg = configured_color(id, row, cfg, "bg");
     let text = s
         .text
@@ -93,6 +97,7 @@ fn wrap(id: &str, s: Segment, row: Option<&Value>, cfg: &Value, t: &Theme, d: &s
 fn segment(
     id: &str,
     c: &RenderContext,
+    cmd: &cmd::CmdContext<'_>,
     e: &external::Values,
     pomodoro: Option<&pomodoro::Pomodoro>,
     usage: Option<&crate::usage::UsageCache>,
@@ -137,6 +142,7 @@ fn segment(
         "fastMode" => simple::fast_mode(c),
         "outputStyle" => simple::output_style(c),
         "thinking" => simple::thinking(c),
+        id if id.starts_with("cmd:") => cmd::segment(&id["cmd:".len()..], c, cmd, now),
         _ => None,
     }
 }
@@ -151,7 +157,7 @@ pub fn render_value(raw: Value, cfg: Value) -> String {
         .parent()
         .unwrap_or(Path::new("."))
         .to_path_buf();
-    render_value_at(raw, cfg, config_dir, RenderMode::Live, None)
+    render_value_at(raw, cfg, config_dir, RenderMode::Live, None, &[])
 }
 
 /// Renders a TUI preview without consulting or mutating live renderer state.
@@ -178,7 +184,7 @@ fn render_value_preview_with_columns(
     config_dir: PathBuf,
     columns: Option<usize>,
 ) -> String {
-    render_value_at(raw, cfg, config_dir, RenderMode::Preview, columns)
+    render_value_at(raw, cfg, config_dir, RenderMode::Preview, columns, &[])
 }
 
 fn render_value_at(
@@ -187,6 +193,7 @@ fn render_value_at(
     config_dir: PathBuf,
     mode: RenderMode,
     columns: Option<usize>,
+    raw_stdin: &[u8],
 ) -> String {
     let template = themes::builtin(
         cfg.get("activeTemplate")
@@ -203,6 +210,12 @@ fn render_value_at(
         .map(|index| resolved_row_segments(&cfg, &template, index))
         .collect::<Vec<_>>();
     let now = crate::clock::now_ms();
+    let cmd_ctx = cmd::CmdContext {
+        config_dir: &config_dir,
+        raw_stdin,
+        is_preview: matches!(&mode, RenderMode::Preview),
+        specs: config::commands(&cfg),
+    };
     let (need_git, need_node, need_python) =
         row_segments
             .iter()
@@ -270,8 +283,16 @@ fn render_value_at(
                     if id == "flex" {
                         Some(row_builder::FLEX.into())
                     } else {
-                        segment(id, &c, &external, pomodoro.as_ref(), usage.as_ref(), now)
-                            .map(|s| wrap(id, s, row, &cfg, &template, d))
+                        segment(
+                            id,
+                            &c,
+                            &cmd_ctx,
+                            &external,
+                            pomodoro.as_ref(),
+                            usage.as_ref(),
+                            now,
+                        )
+                        .map(|s| wrap(id, s, row, &cfg, &template, d))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -308,13 +329,29 @@ fn resolved_row_segments<'a>(
                 .unwrap_or_default()
         })
 }
-pub fn render(raw: Value) {
+pub fn render(raw: Value, raw_stdin: Vec<u8>) {
     match config::load() {
-        Ok(x) => print!("{}", render_value(raw, Value::Object(x.config.0))),
+        Ok(x) => {
+            let config_dir = config::settings_path()
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            print!(
+                "{}",
+                render_value_at(
+                    raw,
+                    Value::Object(x.config.0),
+                    config_dir,
+                    RenderMode::Live,
+                    None,
+                    &raw_stdin,
+                )
+            );
+        }
         Err(e) => println!("⚠ warning: phosphorpulse config invalid — {e}"),
     }
 }
-pub fn render_subagent(raw: Value) {
+pub fn render_subagent(raw: Value, _raw_stdin: Vec<u8>) {
     let cfg = config::load()
         .map(|x| Value::Object(x.config.0))
         .unwrap_or_else(|_| Value::Object(config::default_config().0));

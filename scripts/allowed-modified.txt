@@ -32,3 +32,17 @@ tests/tui_preview.rs
 src/tui/i18n.rs
 src/config/model.rs
 tests/tui_assembly.rs
+src/usage/lock.rs
+src/atomic_write.rs
+src/config/mod.rs
+src/tui/app.rs
+src/cmd/mod.rs
+src/cmd/cache.rs
+src/cmd/ansi.rs
+src/cmd/trigger.rs
+tests/cmd_config.rs
+tests/cmd_cache.rs
+tests/cmd_segment.rs
+tests/cmd_refresh.rs
+tests/tui_commands.rs
+src/cmd/run.rs

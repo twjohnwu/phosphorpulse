@@ -11,6 +11,9 @@ fn main() {
         [command] if command == "usage-refresh" => {
             std::process::exit(phosphorpulse::usage::refresh_command())
         }
+        [command, name, cwd] if command == "cmd-refresh" => {
+            std::process::exit(phosphorpulse::cmd::refresh_command(name, cwd))
+        }
         [command] if command == "migrate" => migrate_command(false),
         [command, flag] if command == "migrate" && flag == "--force" => migrate_command(true),
         [] => no_args(),
@@ -24,15 +27,15 @@ fn migrate_command(force: bool) {
     }
 }
 
-fn render_command(render: fn(serde_json::Value)) {
-    let raw = match protocol::read_stdin_json() {
-        Ok(raw) => raw,
+fn render_command(render: fn(serde_json::Value, Vec<u8>)) {
+    let (raw, raw_stdin) = match protocol::read_stdin_json() {
+        Ok(input) => input,
         Err(reason) => {
             eprintln!("phosphorpulse: invalid stdin: {reason}");
             std::process::exit(1);
         }
     };
-    render(raw);
+    render(raw, raw_stdin);
 }
 
 fn no_args() {

@@ -358,3 +358,151 @@ fn test_s06_preview_limit_model_synthetic() {
         "preview must not read, claim, or spawn usage refresh work"
     );
 }
+
+/// REQ-03 / S-08: Preview arm for `cmd:<name>` renders the fixed `<name>:
+/// preview` text and never reads, writes, or forks against the real command
+/// pipeline — no cache directory is created and a PATH-prepended fork-count
+/// stub never executes.
+#[test]
+fn test_s08_preview_cmd_static() {
+    fn strip_ansi(input: &str) -> String {
+        let bytes = input.as_bytes();
+        let mut plain = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+
+        while index < bytes.len() {
+            if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'[') {
+                index += 2;
+                while index < bytes.len() {
+                    let byte = bytes[index];
+                    index += 1;
+                    if (0x40..=0x7e).contains(&byte) {
+                        break;
+                    }
+                }
+            } else {
+                plain.push(bytes[index]);
+                index += 1;
+            }
+        }
+
+        String::from_utf8(plain).expect("stripping ANSI preserves UTF-8")
+    }
+
+    struct PathGuard {
+        path: Option<OsString>,
+        marker: Option<OsString>,
+    }
+
+    impl PathGuard {
+        fn prepend(stub_dir: &Path, marker_file: &Path) -> Self {
+            let guard = Self {
+                path: std::env::var_os("PATH"),
+                marker: std::env::var_os("PPULSE_S08_MARK"),
+            };
+            unsafe {
+                std::env::set_var(
+                    "PATH",
+                    format!("{}:/usr/bin:/bin", stub_dir.display()),
+                );
+                std::env::set_var("PPULSE_S08_MARK", marker_file);
+            }
+            guard
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.path {
+                    Some(value) => std::env::set_var("PATH", value),
+                    None => std::env::remove_var("PATH"),
+                }
+                match &self.marker {
+                    Some(value) => std::env::set_var("PPULSE_S08_MARK", value),
+                    None => std::env::remove_var("PPULSE_S08_MARK"),
+                }
+            }
+        }
+    }
+
+    let temp = TempDir::new("s08-preview-cmd-static");
+    let home = temp.path().join("home");
+    let real_config = home.join(".claude/phosphorpulse");
+    fs::create_dir_all(&real_config).expect("create real config canary dir");
+    let _environment = EnvGuard::use_temp_home(&home);
+
+    // Fork-count stub: an executable `sh` on PATH ahead of the real one that
+    // marks a file, then execs through to the real shell — defensive
+    // evidence that no subprocess was ever spawned (design-be.md §6.3).
+    let stub_dir = temp.path().join("stub-bin");
+    fs::create_dir_all(&stub_dir).expect("create fork-count stub dir");
+    let marker_file = temp.path().join("s08-fork-marker");
+    fs::write(
+        stub_dir.join("sh"),
+        format!(
+            "#!/bin/sh\ntouch \"{}\"\nexec /bin/sh \"$@\"\n",
+            marker_file.display()
+        ),
+    )
+    .expect("write fork-count stub script");
+    fs::set_permissions(
+        stub_dir.join("sh"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("make fork-count stub executable");
+    let _path_guard = PathGuard::prepend(&stub_dir, &marker_file);
+
+    let mut draft = serde_json::to_value(Config::defaults()).expect("serialize default config");
+    draft["rows"] = json!([{"layout": "auto", "segments": ["model", "cmd:k8s"]}]);
+    draft["commands"] = json!({
+        "k8s": {"command": "echo SHOULD-NOT-RUN > /tmp/ppulse-s08"}
+    });
+    let draft: Config = Config(
+        draft
+            .as_object()
+            .expect("preview draft is an object")
+            .clone(),
+    );
+
+    let before = tree_snapshot(&real_config);
+
+    let main_sample = preview::main_sample();
+    let subagent_sample = json!({"tasks": []});
+    let first = preview::render_preview(&draft, main_sample.clone(), subagent_sample.clone());
+    let _second = preview::render_preview(&draft, main_sample, subagent_sample);
+
+    let plain = strip_ansi(&first);
+    let first_line = plain.lines().next().unwrap_or_default();
+    assert!(
+        first_line.contains("k8s: preview"),
+        "preview should show the static k8s placeholder: {first_line:?}"
+    );
+    assert!(
+        !first_line.contains("SHOULD-NOT-RUN"),
+        "preview must never execute the configured command: {first_line:?}"
+    );
+    assert!(
+        !marker_file.exists(),
+        "preview must never fork through the PATH stub"
+    );
+    assert!(
+        !Path::new("/tmp/ppulse-s08").exists(),
+        "preview must never actually run the configured command"
+    );
+    assert!(
+        !real_config.join("commands").exists(),
+        "preview must never create the commands cache directory"
+    );
+    let preview_config_dir =
+        std::env::temp_dir().join(format!("phosphorpulse-preview-{}", std::process::id()));
+    assert!(
+        !preview_config_dir.join("commands").exists(),
+        "the actual preview config_dir used by render_preview must never gain a commands/ dir"
+    );
+    assert_eq!(
+        tree_snapshot(&real_config),
+        before,
+        "preview leaves the real config directory byte-for-byte unchanged"
+    );
+}

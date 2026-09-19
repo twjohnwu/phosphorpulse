@@ -1,8 +1,12 @@
 use std::{
-    fs, io,
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::Path,
     time::{Duration, SystemTime},
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 /// Replace `path` without exposing a partially-written file to readers.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
@@ -16,6 +20,40 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         .unwrap_or("state");
     let temporary = parent.join(format!("{name}.tmp-{}", std::process::id()));
     fs::write(&temporary, contents)?;
+    replace_file(&temporary, path)
+}
+
+/// Replace `path` atomically after creating the temporary file with `mode`.
+pub fn write_atomic_mode(path: &Path, contents: &[u8], mode: u32) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("path has no parent"))?;
+    fs::create_dir_all(parent)?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("state");
+    let mut temporary = parent.join(format!("{name}.tmp-{}", std::process::id()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+
+    let mut file = match options.open(&temporary) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let nanos = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0);
+            temporary = parent.join(format!("{name}.tmp-{}-{nanos}", std::process::id()));
+            options.open(&temporary)?
+        }
+        Err(error) => return Err(error),
+    };
+    file.write_all(contents)?;
     replace_file(&temporary, path)
 }
 

@@ -14,17 +14,25 @@ use crate::tui::{
     settings_writer, templates_io,
 };
 use crossterm::event::{KeyCode, KeyEvent};
+use phosphorpulse::{
+    config::{self, model::Config},
+    jsx::width::display_width,
+    protocol,
+};
 use ratatui::{
     Frame,
+    layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
 use serde_json::Value;
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 pub struct RowsSegmentsScreen {
     move_mode: bool,
@@ -39,11 +47,29 @@ pub struct SaveExitScreen;
 
 /// The first 14 IDs keep the frozen TS `listMainSegments()` order; the last 5
 /// were added by the stdin-extra-segments change.
-const MAIN_SEGMENT_IDS: [&str; 19] = [
-    "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node", "python", "version",
-    "cost", "burn", "pomodoro", "flex", "session", "fastMode", "outputStyle", "thinking",
-    "limitModel",
-];
+const fn builtin_main_segment_ids() -> [&'static str; 19] {
+    [
+        "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node", "python",
+        "version", "cost", "burn", "pomodoro", "flex", "session", "fastMode", "outputStyle",
+        "thinking", "limitModel",
+    ]
+}
+
+fn configured_commands(draft: &Config) -> BTreeMap<String, config::CommandSpec> {
+    config::commands(&Value::Object(draft.0.clone()))
+}
+
+pub fn main_segment_ids(draft: &Config) -> Vec<String> {
+    builtin_main_segment_ids()
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            configured_commands(draft)
+                .into_keys()
+                .map(|name| format!("cmd:{name}")),
+        )
+        .collect()
+}
 /// Frozen TS `listSubagentSegments()` inventory; picker choices must never be
 /// inferred from the main-line list.
 const SUBAGENT_SEGMENT_IDS: [&str; 7] = [
@@ -110,6 +136,28 @@ fn integer_setting_line(s: &AppState, marker: &str, key: &Key, value: i64) -> Li
     ))
 }
 
+fn truncate_with_ellipsis(value: &str, max_width: usize) -> String {
+    if display_width(value) <= max_width {
+        return value.into();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let content_width = max_width.saturating_sub(display_width("…"));
+    let mut truncated = String::new();
+    let mut used = 0;
+    for grapheme in value.graphemes(true) {
+        let width = display_width(grapheme);
+        if used + width > content_width {
+            break;
+        }
+        truncated.push_str(grapheme);
+        used += width;
+    }
+    truncated.push('…');
+    truncated
+}
+
 fn row_segment_line(
     s: &AppState,
     segments: &[String],
@@ -156,6 +204,11 @@ fn hex_color(hex: &str) -> Option<Color> {
     ))
 }
 
+fn segment_fg_hint(draft: &Config, segment: &str) -> String {
+    let hex = draft_ops::effective_segment_fg(draft, segment);
+    draft_ops::named_color(&hex).map_or("(-/58)".into(), |(index, _)| format!("({index}/58)"))
+}
+
 /// Mirrors TemplatesScreen.tsx's `updateDraft` call on template load: merge
 /// the four displayed configuration fields and set the active template. The
 /// snapshot palette intentionally remains on disk for renderer lookup rather
@@ -175,8 +228,8 @@ fn apply_loaded_template(s: &mut AppState, template: Value, name: &str) {
         );
     }
 }
-#[derive(Clone, Copy)]
-enum ColorsFocus {
+#[derive(Clone, PartialEq, Debug)]
+pub enum ColorsFocus {
     Depth,
     SegmentFg(&'static str),
     GaugeWidth,
@@ -185,10 +238,18 @@ enum ColorsFocus {
     GaugeColor(&'static str),
     PomodoroWorkMin,
     UsageRefreshSec,
+    CmdFg(String),
+    CmdCommand(String),
+    CmdTimeoutMs(String),
+    CmdTtlSec(String),
+    CmdMaxWidth(String),
+    CmdPreserveColors(String),
+    CmdAdd,
     DirPathDepth,
     NerdFont,
 }
-const COLORS_FOCUS: [ColorsFocus; 29] = [
+
+const BASE_COLORS_FOCUS: [ColorsFocus; 27] = [
     ColorsFocus::Depth,
     ColorsFocus::SegmentFg("model"),
     ColorsFocus::SegmentFg("effort"),
@@ -216,16 +277,42 @@ const COLORS_FOCUS: [ColorsFocus; 29] = [
     ColorsFocus::GaugeColor("hot"),
     ColorsFocus::PomodoroWorkMin,
     ColorsFocus::UsageRefreshSec,
-    ColorsFocus::DirPathDepth,
-    ColorsFocus::NerdFont,
 ];
-const COLORS_SEPARATOR_BEFORE: [usize; 3] = [19, 25, 27];
 
-fn colors_line_index(focus: usize) -> usize {
+pub fn colors_focus(draft: &Config) -> Vec<ColorsFocus> {
+    let commands = configured_commands(draft);
+    let mut focus = BASE_COLORS_FOCUS.to_vec();
+    for name in commands.keys() {
+        focus.extend([
+            ColorsFocus::CmdFg(name.clone()),
+            ColorsFocus::CmdCommand(name.clone()),
+            ColorsFocus::CmdTimeoutMs(name.clone()),
+            ColorsFocus::CmdTtlSec(name.clone()),
+            ColorsFocus::CmdMaxWidth(name.clone()),
+            ColorsFocus::CmdPreserveColors(name.clone()),
+        ]);
+    }
+    focus.extend([
+        ColorsFocus::CmdAdd,
+        ColorsFocus::DirPathDepth,
+        ColorsFocus::NerdFont,
+    ]);
     focus
-        + COLORS_SEPARATOR_BEFORE
-            .iter()
-            .filter(|&&separator| separator <= focus)
+}
+
+pub fn colors_separators(draft: &Config) -> Vec<usize> {
+    let command_count = configured_commands(draft).len();
+    let mut separators = vec![19, 25, 27];
+    separators.extend((1..command_count).map(|index| 27 + 6 * index));
+    separators.push(28 + 6 * command_count);
+    separators
+}
+
+pub fn colors_line_index(draft: &Config, focus: usize) -> usize {
+    focus
+        + colors_separators(draft)
+            .into_iter()
+            .filter(|&separator| separator <= focus)
             .count()
 }
 
@@ -367,9 +454,12 @@ impl Screen for RowsSegmentsScreen {
             return;
         };
         if let crate::tui::app::UiMode::SegmentPicker { target, .. } = s.mode {
-            let options: &[&str] = match target {
-                SegmentPickerTarget::Main => &MAIN_SEGMENT_IDS,
-                SegmentPickerTarget::Subagent => &SUBAGENT_SEGMENT_IDS,
+            let options: Vec<String> = match target {
+                SegmentPickerTarget::Main => main_segment_ids(&s.draft),
+                SegmentPickerTarget::Subagent => SUBAGENT_SEGMENT_IDS
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
             };
             let body = options
                 .iter()
@@ -450,16 +540,19 @@ impl Screen for RowsSegmentsScreen {
             position,
         } = s.mode
         {
-            let options: &[&str] = match target {
-                SegmentPickerTarget::Main => &MAIN_SEGMENT_IDS,
-                SegmentPickerTarget::Subagent => &SUBAGENT_SEGMENT_IDS,
+            let options: Vec<String> = match target {
+                SegmentPickerTarget::Main => main_segment_ids(&s.draft),
+                SegmentPickerTarget::Subagent => SUBAGENT_SEGMENT_IDS
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
             };
             match e.code {
                 KeyCode::Esc => s.mode = crate::tui::app::UiMode::Normal,
                 KeyCode::Up => move_focus(s, options.len(), -1),
                 KeyCode::Down => move_focus(s, options.len(), 1),
                 KeyCode::Enter => {
-                    let id = options[s.selected().min(options.len() - 1)];
+                    let id = &options[s.selected().min(options.len() - 1)];
                     match target {
                         SegmentPickerTarget::Main => {
                             let row = s.row_index;
@@ -472,7 +565,7 @@ impl Screen for RowsSegmentsScreen {
                             s.draft = if row == row_count(s) {
                                 // TS RowsSegmentsScreen's virtual new-row slot becomes real
                                 // only when the picker commits its first segment.
-                                draft_ops::add_row(&s.draft, vec![id.into()])
+                                draft_ops::add_row(&s.draft, vec![id.clone()])
                             } else {
                                 draft_ops::insert_row_segment(&s.draft, row, index, id)
                             };
@@ -703,6 +796,226 @@ impl Screen for SubagentLineScreen {
         Action::Redraw
     }
 }
+
+fn command_input_prompt(s: &AppState) -> Option<String> {
+    let key = match s.mode {
+        crate::tui::app::UiMode::CommandName => Key::ColorsHintCmdName,
+        crate::tui::app::UiMode::CommandString => Key::ColorsHintCmdCommand,
+        crate::tui::app::UiMode::CommandEdit => Key::ColorsHintCmdEdit,
+        _ => return None,
+    };
+    Some(t(s.lang, &key, &[]))
+}
+
+fn clear_command_input(s: &mut AppState) {
+    s.input.clear();
+    s.input_error = None;
+    s.pending_command = None;
+    s.mode = crate::tui::app::UiMode::Normal;
+}
+
+fn submit_command_input(s: &mut AppState) {
+    use crate::tui::app::UiMode;
+
+    let mode = s.mode.clone();
+    let value = std::mem::take(&mut s.input);
+    match mode {
+        UiMode::CommandName => {
+            let commands = configured_commands(&s.draft);
+            if config::model::is_valid_command_name(&value) && !commands.contains_key(&value) {
+                s.pending_command = Some(value);
+                s.input_error = None;
+                s.mode = UiMode::CommandString;
+            } else {
+                s.input = value;
+                s.input_error = Some(Key::ColorsCmdNameInvalid);
+            }
+        }
+        UiMode::CommandString | UiMode::CommandEdit if value.trim().is_empty() => {
+            s.input = value;
+            s.input_error = Some(Key::ColorsCmdCommandEmpty);
+        }
+        UiMode::CommandString => {
+            let Some(name) = s.pending_command.take() else {
+                clear_command_input(s);
+                return;
+            };
+            s.draft = draft_ops::add_command(&s.draft, &name, &value);
+            let selected = colors_focus(&s.draft)
+                .iter()
+                .position(|focus| matches!(focus, ColorsFocus::CmdFg(candidate) if candidate == &name))
+                .expect("new command has a foreground focus row");
+            s.set_selected(selected);
+            s.input_error = None;
+            s.mode = UiMode::Normal;
+        }
+        UiMode::CommandEdit => {
+            let Some(name) = s.pending_command.take() else {
+                clear_command_input(s);
+                return;
+            };
+            s.draft = draft_ops::set_command_string(&s.draft, &name, &value);
+            s.input_error = None;
+            s.mode = UiMode::Normal;
+        }
+        _ => s.input = value,
+    }
+}
+
+fn on_colors_input(e: KeyEvent, s: &mut AppState) {
+    s.input_error = None;
+    match e.code {
+        KeyCode::Esc => clear_command_input(s),
+        KeyCode::Backspace => s.pop_input_grapheme(),
+        KeyCode::Char(character) => s.push_input(character),
+        KeyCode::Enter => submit_command_input(s),
+        _ => {}
+    }
+}
+
+fn remove_command_cache(config_dir: &Path, name: &str) {
+    let Ok(entries) = fs::read_dir(config_dir.join("commands")) else {
+        return;
+    };
+    let prefix = format!("{name}-");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if file_name.starts_with(&prefix) && file_name.ends_with(".json") {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+fn on_colors_confirm_delete(e: KeyEvent, s: &mut AppState) {
+    use crate::tui::app::UiMode;
+
+    let selected = s.selected();
+    let pending = s.pending_command.take();
+    if e.code == KeyCode::Char('y')
+        && let Some(name) = pending
+    {
+        let (draft, removed_rows) = draft_ops::remove_command(&s.draft, &name);
+        s.draft = draft;
+        remove_command_cache(&s.config_dir, &name);
+        s.command_notice = Some(t(
+            s.lang,
+            &Key::ColorsHintCmdRemovedRows,
+            &[("count", &removed_rows.to_string())],
+        ));
+        s.set_selected(selected.saturating_sub(1).min(colors_focus(&s.draft).len() - 1));
+    }
+    s.input.clear();
+    s.input_error = None;
+    s.mode = UiMode::Normal;
+}
+
+fn colors_adjustment(s: &AppState, current: &ColorsFocus, direction: i8) -> Option<Config> {
+    match current {
+        ColorsFocus::Depth => Some(draft_ops::cycle_color_depth(&s.draft, direction)),
+        ColorsFocus::SegmentFg(segment) => {
+            Some(draft_ops::cycle_segment_fg(&s.draft, segment, direction))
+        }
+        ColorsFocus::GaugeWidth => Some(draft_ops::adjust_gauge_bar_width(&s.draft, direction)),
+        ColorsFocus::GaugeWarnPct => Some(draft_ops::adjust_gauge_warn_pct(&s.draft, direction)),
+        ColorsFocus::GaugeHotPct => Some(draft_ops::adjust_gauge_hot_pct(&s.draft, direction)),
+        ColorsFocus::GaugeColor(state) => {
+            Some(draft_ops::cycle_gauge_color(&s.draft, state, direction))
+        }
+        ColorsFocus::PomodoroWorkMin => {
+            Some(draft_ops::adjust_pomodoro_work_min(&s.draft, direction))
+        }
+        ColorsFocus::UsageRefreshSec => {
+            Some(draft_ops::adjust_usage_refresh_sec(&s.draft, direction))
+        }
+        ColorsFocus::CmdFg(name) => Some(draft_ops::cycle_segment_fg(
+            &s.draft,
+            &format!("cmd:{name}"),
+            direction,
+        )),
+        ColorsFocus::CmdTimeoutMs(name)
+        | ColorsFocus::CmdTtlSec(name)
+        | ColorsFocus::CmdMaxWidth(name) => {
+            let (key, default, step, min, max) = match current {
+                ColorsFocus::CmdTimeoutMs(_) => ("timeoutMs", 1_000, 100, 100, 10_000),
+                ColorsFocus::CmdTtlSec(_) => ("ttlSec", 5, 1, 1, 3_600),
+                ColorsFocus::CmdMaxWidth(_) => ("maxWidth", 24, 1, 8, 80),
+                _ => unreachable!(),
+            };
+            Some(draft_ops::adjust_command_int(
+                &s.draft, name, key, default, step, min, max, direction,
+            ))
+        }
+        ColorsFocus::CmdPreserveColors(name) => Some(draft_ops::toggle_command_bool(
+            &s.draft,
+            name,
+            "preserveColors",
+            false,
+        )),
+        ColorsFocus::DirPathDepth => Some(draft_ops::adjust_dir_path_depth(&s.draft, direction)),
+        ColorsFocus::NerdFont => {
+            let mut draft = s.draft.clone();
+            let enabled = draft
+                .0
+                .get("nerdFont")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            draft.0.insert("nerdFont".into(), Value::Bool(!enabled));
+            Some(draft)
+        }
+        ColorsFocus::CmdAdd | ColorsFocus::CmdCommand(_) => None,
+    }
+}
+
+fn on_colors_normal(e: KeyEvent, s: &mut AppState) -> Action {
+    use crate::tui::app::UiMode;
+
+    if back(e, s) {
+        return Action::Back;
+    }
+    let focus = colors_focus(&s.draft);
+    let current = focus[s.selected().min(focus.len() - 1)].clone();
+    match e.code {
+        KeyCode::Char('a') => {
+            s.input.clear();
+            s.input_error = None;
+            s.pending_command = None;
+            s.mode = UiMode::CommandName;
+        }
+        KeyCode::Enter => {
+            if let ColorsFocus::CmdCommand(name) = current {
+                let command = configured_commands(&s.draft)
+                    .get(&name)
+                    .and_then(|spec| protocol::clean_text(Some(&spec.command)))
+                    .unwrap_or_default();
+                s.input = command;
+                s.input_error = None;
+                s.pending_command = Some(name);
+                s.mode = UiMode::CommandEdit;
+            }
+        }
+        KeyCode::Char('d') => {
+            if let ColorsFocus::CmdFg(name) = current {
+                s.input_error = None;
+                s.pending_command = Some(name);
+                s.mode = UiMode::ConfirmDeleteCommand;
+            }
+        }
+        KeyCode::Up => move_focus(s, focus.len(), -1),
+        KeyCode::Down => move_focus(s, focus.len(), 1),
+        KeyCode::Left | KeyCode::Right => {
+            let direction = if e.code == KeyCode::Left { -1 } else { 1 };
+            if let Some(next) = colors_adjustment(s, &current, direction) {
+                s.draft = next;
+            }
+        }
+        _ => {}
+    }
+    Action::Redraw
+}
+
 impl Screen for ColorsThemeScreen {
     fn draw(&self, f: &mut Frame, s: &AppState) {
         let Some(a) = areas(f, s) else {
@@ -711,17 +1024,28 @@ impl Screen for ColorsThemeScreen {
         };
         header(f, a[0], &t(s.lang, &Key::MenuColorsTheme, &[]));
         let gauge = s.draft.0.get("gauge");
-        let selected = s.selected();
+        let focus = colors_focus(&s.draft);
+        let separators = colors_separators(&s.draft);
+        let command_count = configured_commands(&s.draft).len();
+        let commands_empty = command_count == 0;
+        let selected = s.selected().min(focus.len() - 1);
         let mut rows = Vec::new();
-        for (index, focus) in COLORS_FOCUS.iter().enumerate() {
-            if COLORS_SEPARATOR_BEFORE.contains(&index) {
-                rows.push(Line::from(Span::styled(
-                    "────────────────",
-                    Style::default().fg(crate::tui::screens::common::DIM),
-                )));
+        for (index, item) in focus.iter().enumerate() {
+            if separators.contains(&index) {
+                if index > 27
+                    && index < 27 + 6 * command_count
+                    && (index - 27) % 6 == 0
+                {
+                    rows.push(Line::default());
+                } else {
+                    rows.push(Line::from(Span::styled(
+                        "────────────────",
+                        Style::default().fg(crate::tui::screens::common::DIM),
+                    )));
+                }
             }
             let marker = if index == selected { "▸" } else { " " };
-            rows.push(match focus {
+            rows.push(match item {
                 ColorsFocus::Depth => Line::from(format!(
                     "{marker} {}",
                     t(
@@ -822,6 +1146,98 @@ impl Screen for ColorsThemeScreen {
                     &Key::ColorsUsageRefreshSec,
                     usage_refresh_sec(s),
                 ),
+                ColorsFocus::CmdFg(name) => {
+                    let segment = format!("cmd:{name}");
+                    let hex = draft_ops::effective_segment_fg(&s.draft, &segment);
+                    let label = draft_ops::named_color(&hex)
+                        .map_or_else(|| hex.clone(), |(_, color_name)| color_name.into());
+                    Line::from(vec![
+                        Span::raw(format!("{marker} ")),
+                        Span::styled(
+                            segment,
+                            Style::default()
+                                .fg(ACCENT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(t(
+                            s.lang,
+                            &Key::ColorsSegmentForeground,
+                            &[("segment", "")],
+                        )),
+                        Span::styled(label, Style::default().fg(hex_color(&hex).unwrap_or(TEXT))),
+                    ])
+                }
+                ColorsFocus::CmdCommand(name) => {
+                    let command = s
+                        .draft
+                        .0
+                        .get("commands")
+                        .and_then(Value::as_object)
+                        .and_then(|commands| commands.get(name))
+                        .and_then(Value::as_object)
+                        .and_then(|command| command.get("command"))
+                        .and_then(Value::as_str);
+                    let cleaned = protocol::clean_text(command).unwrap_or_default();
+                    let prefix = t(s.lang, &Key::ColorsCmdCommand, &[("value", "")]);
+                    let available = usize::from(a[1].width)
+                        .saturating_sub(display_width(marker) + 1 + display_width(&prefix));
+                    let displayed = truncate_with_ellipsis(&cleaned, available);
+                    Line::from(format!(
+                        "{marker} {}",
+                        t(s.lang, &Key::ColorsCmdCommand, &[("value", &displayed)])
+                    ))
+                }
+                ColorsFocus::CmdTimeoutMs(name) => integer_setting_line(
+                    s,
+                    marker,
+                    &Key::ColorsCmdTimeoutMs,
+                    draft_ops::command_field_i64(&s.draft, name, "timeoutMs", 1_000),
+                ),
+                ColorsFocus::CmdTtlSec(name) => integer_setting_line(
+                    s,
+                    marker,
+                    &Key::ColorsCmdTtlSec,
+                    draft_ops::command_field_i64(&s.draft, name, "ttlSec", 5),
+                ),
+                ColorsFocus::CmdMaxWidth(name) => integer_setting_line(
+                    s,
+                    marker,
+                    &Key::ColorsCmdMaxWidth,
+                    draft_ops::command_field_i64(&s.draft, name, "maxWidth", 24),
+                ),
+                ColorsFocus::CmdPreserveColors(name) => {
+                    let enabled = s
+                        .draft
+                        .0
+                        .get("commands")
+                        .and_then(Value::as_object)
+                        .and_then(|commands| commands.get(name))
+                        .and_then(Value::as_object)
+                        .and_then(|command| command.get("preserveColors"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    Line::from(format!(
+                        "{marker} {}",
+                        t(
+                            s.lang,
+                            &Key::ColorsCmdPreserveColors,
+                            &[("value", if enabled { "on" } else { "off" })]
+                        )
+                    ))
+                }
+                ColorsFocus::CmdAdd => Line::from(format!(
+                    "{marker} {}",
+                    t(
+                        s.lang,
+                        &if commands_empty {
+                            Key::ColorsCmdEmpty
+                        } else {
+                            Key::ColorsCmdAdd
+                        },
+                        &[]
+                    )
+                ))
+                .style(Style::default().fg(crate::tui::screens::common::DIM)),
                 ColorsFocus::DirPathDepth => Line::from(format!(
                     "{marker} {}",
                     t(
@@ -863,25 +1279,55 @@ impl Screen for ColorsThemeScreen {
                 }
             });
         }
+        let input_prompt = command_input_prompt(s);
+        let (list_area, input_area) = if input_prompt.is_some() {
+            let input_height = 2 + u16::from(s.input_error.is_some());
+            let chunks = Layout::vertical([
+                Constraint::Min(1),
+                Constraint::Length(input_height),
+            ])
+            .split(a[1]);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (a[1], None)
+        };
         f.render_widget(
             scrolled_list(
                 rows,
-                colors_line_index(selected),
-                COLORS_FOCUS.len() + COLORS_SEPARATOR_BEFORE.len(),
-                a[1],
+                colors_line_index(&s.draft, selected),
+                focus.len() + separators.len(),
+                list_area,
             )
             .style(Style::default().fg(TEXT)),
-            a[1],
+            list_area,
         );
-        footer(
-            f,
-            a[2],
-            &[
-                match COLORS_FOCUS[selected] {
-                    ColorsFocus::SegmentFg(segment) => {
-                        let hex = draft_ops::effective_segment_fg(&s.draft, segment);
-                        draft_ops::named_color(&hex)
-                            .map_or("(-/58)".into(), |(index, _)| format!("({index}/58)"))
+        if let (Some(prompt), Some(area)) = (input_prompt, input_area) {
+            let mut lines = crate::tui::screens::common::input_line(&prompt, &s.input, area.width);
+            if let Some(error) = s.input_error {
+                lines.push(Line::from(Span::styled(
+                    t(s.lang, &error, &[]),
+                    Style::default().fg(ERROR),
+                )));
+            }
+            f.render_widget(Paragraph::new(lines), area);
+        }
+        let footer_text = if s.mode == crate::tui::app::UiMode::ConfirmDeleteCommand {
+            t(
+                s.lang,
+                &Key::ColorsHintCmdDelete,
+                &[(
+                    "name",
+                    s.pending_command.as_deref().unwrap_or_default(),
+                )],
+            )
+        } else if let Some(notice) = &s.command_notice {
+            notice.clone()
+        } else {
+            let mut footer_parts = vec![
+                match &focus[selected] {
+                    ColorsFocus::SegmentFg(segment) => segment_fg_hint(&s.draft, segment),
+                    ColorsFocus::CmdFg(name) => {
+                        segment_fg_hint(&s.draft, &format!("cmd:{name}"))
                     }
                     ColorsFocus::GaugeColor(state) => {
                         let hex = draft_ops::effective_gauge_color(&s.draft, state);
@@ -892,61 +1338,45 @@ impl Screen for ColorsThemeScreen {
                 },
                 t(s.lang, &Key::MainMenuHintMove, &[]),
                 t(s.lang, &Key::ColorsHintCycleAdjust, &[]),
-            ]
-            .join(" "),
-        );
+            ];
+            match &focus[selected] {
+                ColorsFocus::CmdFg(_) => {
+                    footer_parts.push(t(s.lang, &Key::ColorsHintCmdDeleteKey, &[]));
+                    footer_parts.push(t(s.lang, &Key::ColorsHintCmdAddKey, &[]));
+                }
+                ColorsFocus::CmdCommand(_) => {
+                    footer_parts.push(t(s.lang, &Key::ColorsHintCmdEditKey, &[]));
+                    footer_parts.push(t(s.lang, &Key::ColorsHintCmdAddKey, &[]));
+                }
+                ColorsFocus::CmdTimeoutMs(_)
+                | ColorsFocus::CmdTtlSec(_)
+                | ColorsFocus::CmdMaxWidth(_)
+                | ColorsFocus::CmdPreserveColors(_)
+                | ColorsFocus::CmdAdd => {
+                    footer_parts.push(t(s.lang, &Key::ColorsHintCmdAddKey, &[]));
+                }
+                _ => {}
+            }
+            footer_parts.join(" ")
+        };
+        footer(f, a[2], &footer_text);
         preview(f, a[3], s)
     }
     fn on_key(&mut self, e: KeyEvent, s: &mut AppState) -> Action {
-        if back(e, s) {
-            return Action::Back;
-        }
-        match e.code {
-            KeyCode::Up => move_focus(s, COLORS_FOCUS.len(), -1),
-            KeyCode::Down => move_focus(s, COLORS_FOCUS.len(), 1),
-            KeyCode::Left | KeyCode::Right => {
-                let direction = if e.code == KeyCode::Left { -1 } else { 1 };
-                s.draft = match COLORS_FOCUS[s.selected()] {
-                    ColorsFocus::Depth => draft_ops::cycle_color_depth(&s.draft, direction),
-                    ColorsFocus::SegmentFg(segment) => {
-                        draft_ops::cycle_segment_fg(&s.draft, segment, direction)
-                    }
-                    ColorsFocus::GaugeWidth => {
-                        draft_ops::adjust_gauge_bar_width(&s.draft, direction)
-                    }
-                    ColorsFocus::GaugeWarnPct => {
-                        draft_ops::adjust_gauge_warn_pct(&s.draft, direction)
-                    }
-                    ColorsFocus::GaugeHotPct => {
-                        draft_ops::adjust_gauge_hot_pct(&s.draft, direction)
-                    }
-                    ColorsFocus::GaugeColor(state) => {
-                        draft_ops::cycle_gauge_color(&s.draft, state, direction)
-                    }
-                    ColorsFocus::PomodoroWorkMin => {
-                        draft_ops::adjust_pomodoro_work_min(&s.draft, direction)
-                    }
-                    ColorsFocus::UsageRefreshSec => {
-                        draft_ops::adjust_usage_refresh_sec(&s.draft, direction)
-                    }
-                    ColorsFocus::DirPathDepth => {
-                        draft_ops::adjust_dir_path_depth(&s.draft, direction)
-                    }
-                    ColorsFocus::NerdFont => {
-                        let mut draft = s.draft.clone();
-                        let enabled = draft
-                            .0
-                            .get("nerdFont")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false);
-                        draft.0.insert("nerdFont".into(), Value::Bool(!enabled));
-                        draft
-                    }
-                };
+        s.command_notice = None;
+        match s.mode {
+            crate::tui::app::UiMode::CommandName
+            | crate::tui::app::UiMode::CommandString
+            | crate::tui::app::UiMode::CommandEdit => {
+                on_colors_input(e, s);
+                Action::Redraw
             }
-            _ => {}
+            crate::tui::app::UiMode::ConfirmDeleteCommand => {
+                on_colors_confirm_delete(e, s);
+                Action::Redraw
+            }
+            _ => on_colors_normal(e, s),
         }
-        Action::Redraw
     }
 }
 impl Screen for TemplatesScreen {
@@ -1003,15 +1433,29 @@ impl Screen for TemplatesScreen {
                 .collect::<Vec<_>>()
                 .join("\n"),
         };
-        let body = if matches!(
+        let text_input = matches!(
             s.mode,
-            crate::tui::app::UiMode::Normal | crate::tui::app::UiMode::TemplateDeleteConfirm
-        ) {
-            prompt
+            crate::tui::app::UiMode::TemplateSaveName
+                | crate::tui::app::UiMode::TemplateLoadName
+                | crate::tui::app::UiMode::TemplateExportPath
+                | crate::tui::app::UiMode::TemplateImportPath
+                | crate::tui::app::UiMode::TemplateImportName
+        );
+        if text_input {
+            f.render_widget(
+                Paragraph::new(crate::tui::screens::common::input_line(
+                    &prompt,
+                    &s.input,
+                    a[1].width,
+                )),
+                a[1],
+            );
         } else {
-            format!("{prompt}\n\n{}", s.input)
-        };
-        f.render_widget(Paragraph::new(body).style(Style::default().fg(TEXT)), a[1]);
+            f.render_widget(
+                Paragraph::new(prompt).style(Style::default().fg(TEXT)),
+                a[1],
+            );
+        }
         if let Some(err) = &s.error {
             footer_error(f, a[2], err);
         } else {
@@ -1544,19 +1988,18 @@ mod tests {
     /// REQ-04 / S-04: picker inventories include the new main IDs without changing built-in rows.
     #[test]
     fn test_s04_picker_ids_and_builtin_rows() {
-        assert_eq!(MAIN_SEGMENT_IDS.len(), 19);
+        let ids = main_segment_ids(&Config::defaults());
+        assert_eq!(ids.len(), 19);
         assert_eq!(
-            &MAIN_SEGMENT_IDS[..14],
-            &[
+            ids[..14].iter().map(String::as_str).collect::<Vec<_>>(),
+            [
                 "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node",
                 "python", "version", "cost", "burn", "pomodoro", "flex",
             ]
         );
         assert_eq!(
-            MAIN_SEGMENT_IDS.get(14..),
-            Some(
-                ["session", "fastMode", "outputStyle", "thinking", "limitModel"].as_slice()
-            )
+            ids[14..].iter().map(String::as_str).collect::<Vec<_>>(),
+            ["session", "fastMode", "outputStyle", "thinking", "limitModel"]
         );
         assert_eq!(
             SUBAGENT_SEGMENT_IDS,
@@ -1584,47 +2027,53 @@ mod tests {
     /// REQ-07 / S-08: Colors & Themes lists the new segment foreground controls.
     #[test]
     fn test_s08_colors_focus_lists_new_segments() {
-        assert_eq!(COLORS_FOCUS.len(), 29);
+        let d = Config::defaults();
+        assert_eq!(colors_focus(&d).len(), 30);
 
-        let pomodoro = COLORS_FOCUS
+        let focus = colors_focus(&d);
+        let pomodoro = focus
             .iter()
             .position(|focus| matches!(focus, ColorsFocus::SegmentFg("pomodoro")))
             .expect("pomodoro foreground focus");
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro + 1),
+            focus.get(pomodoro + 1),
             Some(ColorsFocus::SegmentFg("session"))
         ));
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro + 2),
+            focus.get(pomodoro + 2),
             Some(ColorsFocus::SegmentFg("fastMode"))
         ));
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro + 3),
+            focus.get(pomodoro + 3),
             Some(ColorsFocus::SegmentFg("outputStyle"))
         ));
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro + 4),
+            focus.get(pomodoro + 4),
             Some(ColorsFocus::SegmentFg("thinking"))
         ));
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro + 5),
+            focus.get(pomodoro + 5),
             Some(ColorsFocus::SegmentFg("limitModel"))
         ));
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro + 6),
+            focus.get(pomodoro + 6),
             Some(ColorsFocus::GaugeWidth)
         ));
-        assert_eq!(COLORS_SEPARATOR_BEFORE, [19, 25, 27]);
+        assert_eq!(colors_separators(&d), [19, 25, 27, 28]);
 
-        let draft = crate::config::model::Config::defaults();
-        let theme = builtin("matrix-tron");
+        let active_template = d
+            .0
+            .get("activeTemplate")
+            .and_then(Value::as_str)
+            .expect("defaults active template");
+        let theme = builtin(active_template);
         for (id, palette_key) in [
             ("session", "dir"),
             ("fastMode", "warn"),
             ("outputStyle", "version"),
             ("thinking", "warn"),
         ] {
-            let actual = crate::tui::draft_ops::effective_segment_fg(&draft, id);
+            let actual = crate::tui::draft_ops::effective_segment_fg(&d, id);
             assert_eq!(actual.as_str(), theme.palette[palette_key].as_str());
         }
     }
@@ -1634,6 +2083,7 @@ mod tests {
     fn test_s09_list_scroll_offsets() {
         use crate::tui::screens::common::list_scroll_offset;
 
+        let d = Config::defaults();
         assert_eq!(list_scroll_offset(0, 18, 12), 0);
         assert_eq!(list_scroll_offset(5, 18, 12), 0);
         assert_eq!(list_scroll_offset(11, 18, 12), 0);
@@ -1653,54 +2103,108 @@ mod tests {
             (25, 27),
             (26, 28),
             (27, 30),
-            (28, 31),
+            (28, 32),
         ] {
-            assert_eq!(colors_line_index(focus), expected);
+            assert_eq!(colors_line_index(&d, focus), expected);
         }
-        assert_eq!(COLORS_FOCUS.len() + COLORS_SEPARATOR_BEFORE.len(), 32);
+        assert_eq!(30 + 4, 34);
     }
 
     /// REQ-05 / REQ-07 / S-05: limitModel and usage refresh controls occupy fixed TUI slots.
     #[test]
     fn test_s05_limit_model_tui_constants() {
-        assert_eq!(MAIN_SEGMENT_IDS.len(), 19);
-        let main_segment_ids: &[&str] = &MAIN_SEGMENT_IDS;
+        let d = Config::defaults();
+        let main_segment_ids = main_segment_ids(&Config::defaults());
+        assert_eq!(main_segment_ids.len(), 19);
         assert_eq!(main_segment_ids[18], "limitModel");
-        assert_eq!(COLORS_FOCUS.len(), 29);
+        assert_eq!(colors_focus(&d).len(), 30);
 
-        let thinking = COLORS_FOCUS
+        let focuses = colors_focus(&d);
+
+        let thinking = focuses
             .iter()
             .position(|focus| matches!(focus, ColorsFocus::SegmentFg("thinking")))
             .expect("thinking foreground focus");
         assert!(matches!(
-            COLORS_FOCUS.get(thinking + 1),
+            focuses.get(thinking + 1),
             Some(ColorsFocus::SegmentFg("limitModel"))
         ));
         assert!(matches!(
-            COLORS_FOCUS.get(thinking + 2),
+            focuses.get(thinking + 2),
             Some(ColorsFocus::GaugeWidth)
         ));
 
-        let pomodoro_work = COLORS_FOCUS
+        let pomodoro_work = focuses
             .iter()
             .position(|focus| matches!(focus, ColorsFocus::PomodoroWorkMin))
             .expect("pomodoro work minutes focus");
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro_work + 1),
+            focuses.get(pomodoro_work + 1),
             Some(ColorsFocus::UsageRefreshSec)
         ));
         assert!(matches!(
-            COLORS_FOCUS.get(pomodoro_work + 2),
+            focuses.get(pomodoro_work + 2),
+            Some(ColorsFocus::CmdAdd)
+        ));
+        assert!(matches!(
+            focuses.get(pomodoro_work + 3),
             Some(ColorsFocus::DirPathDepth)
         ));
 
-        assert_eq!(COLORS_SEPARATOR_BEFORE, [19, 25, 27]);
-        assert_eq!(COLORS_FOCUS.len() + 3, 32);
+        assert_eq!(colors_separators(&d), [19, 25, 27, 28]);
+        assert_eq!(colors_focus(&d).len() + 4, 34);
 
-        let draft = crate::config::model::Config::defaults();
         assert_eq!(
-            crate::tui::draft_ops::effective_segment_fg(&draft, "limitModel"),
-            crate::tui::draft_ops::effective_segment_fg(&draft, "limit7d")
+            crate::tui::draft_ops::effective_segment_fg(&d, "limitModel"),
+            crate::tui::draft_ops::effective_segment_fg(&d, "limit7d")
+        );
+    }
+
+    /// REQ-04 / REQ-05 / S-06
+    #[test]
+    fn test_s06_dynamic_focus_lists() {
+        let d0 = Config::defaults();
+        let mut d2 = d0.clone();
+        d2.0.insert(
+            "commands".into(),
+            serde_json::json!({
+                "zeta": {"command": "a"},
+                "alpha": {"command": "b"}
+            }),
+        );
+
+        let main0 = main_segment_ids(&d0);
+        assert_eq!(main0.len(), 19);
+        assert_eq!(main0[18], "limitModel");
+
+        let main2 = main_segment_ids(&d2);
+        assert_eq!(main2.len(), 21);
+        assert_eq!(main2[19], "cmd:alpha");
+        assert_eq!(main2[20], "cmd:zeta");
+
+        let focus0 = colors_focus(&d0);
+        assert_eq!(focus0.len(), 30);
+        assert_eq!(focus0[27], ColorsFocus::CmdAdd);
+        assert_eq!(focus0[28], ColorsFocus::DirPathDepth);
+        assert_eq!(focus0[29], ColorsFocus::NerdFont);
+        assert_eq!(colors_separators(&d0), [19, 25, 27, 28]);
+
+        let focus2 = colors_focus(&d2);
+        assert_eq!(focus2.len(), 42);
+        assert_eq!(focus2[27], ColorsFocus::CmdFg("alpha".into()));
+        assert_eq!(focus2[33], ColorsFocus::CmdFg("zeta".into()));
+        assert_eq!(focus2[39], ColorsFocus::CmdAdd);
+        assert_eq!(colors_separators(&d2), [19, 25, 27, 33, 40]);
+
+        let active_template = d2
+            .0
+            .get("activeTemplate")
+            .and_then(Value::as_str)
+            .expect("defaults active template");
+        let theme = builtin(active_template);
+        assert_eq!(
+            crate::tui::draft_ops::effective_segment_fg(&d2, "cmd:alpha"),
+            theme.palette["text"]
         );
     }
 }

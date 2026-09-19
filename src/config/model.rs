@@ -104,6 +104,44 @@ impl Config {
                 }
             }
         }
+        if let Some(commands) = self.0.get("commands") {
+            let commands = commands.as_object().ok_or("/commands: must be an object")?;
+            for (name, command) in commands {
+                if !is_valid_command_name(name) {
+                    return Err(format!(
+                        "/commands/{name}: name must match [A-Za-z0-9_-]{{1,32}}"
+                    ));
+                }
+                let command = command
+                    .as_object()
+                    .ok_or_else(|| format!("/commands/{name}: must be an object"))?;
+                if !matches!(
+                    command.get("command").and_then(Value::as_str),
+                    Some(value) if !value.trim().is_empty() && value.len() <= 4_096
+                ) {
+                    return Err(format!(
+                        "/commands/{name}/command: must be a non-empty string (<= 4096 bytes)"
+                    ));
+                }
+                for (field, min, max) in [
+                    ("timeoutMs", 100, 10_000),
+                    ("ttlSec", 1, 3_600),
+                    ("maxWidth", 8, 80),
+                ] {
+                    if let Some(value) = command.get(field) {
+                        check_int_field(&format!("/commands/{name}/{field}"), value, min, max)?;
+                    }
+                }
+                if command
+                    .get("preserveColors")
+                    .is_some_and(|value| !value.is_boolean())
+                {
+                    return Err(format!(
+                        "/commands/{name}/preserveColors: must be a boolean"
+                    ));
+                }
+            }
+        }
         for (index, row) in rows.iter().enumerate() {
             let row = row
                 .as_object()
@@ -145,6 +183,28 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn check_int_field(path: &str, value: &Value, min: i64, max: i64) -> Result<(), String> {
+    match value.as_f64() {
+        Some(value) if value.fract() == 0.0 && value < min as f64 => {
+            Err(format!("{path}: must be >= {min}, got {value}"))
+        }
+        Some(value) if value.fract() == 0.0 && value > max as f64 => {
+            Err(format!("{path}: must be <= {max}, got {value}"))
+        }
+        Some(value) if value.fract() == 0.0 => Ok(()),
+        Some(value) => Err(format!("{path}: must be an integer, got {value}")),
+        None => Err(format!("{path}: must be an integer")),
+    }
+}
+
+pub(crate) fn is_valid_command_name(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=32).contains(&bytes.len())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn is_six_digit_hex(value: &str) -> bool {

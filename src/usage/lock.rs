@@ -34,7 +34,11 @@ fn lock_age(path: &Path) -> Option<std::time::Duration> {
 
 impl RefreshLock {
     pub fn acquire(usage_dir: &Path) -> Option<RefreshLock> {
-        let path = usage_dir.join("refresh.lock");
+        Self::acquire_at(&usage_dir.join("refresh.lock"))
+    }
+
+    pub fn acquire_at(lock_path: &Path) -> Option<RefreshLock> {
+        let path = lock_path.to_path_buf();
         let token = new_token();
         match create(&path, &token) {
             Ok(()) => Some(RefreshLock { path, token }),
@@ -52,7 +56,7 @@ impl RefreshLock {
                 Some(RefreshLock { path, token })
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                fs::create_dir_all(usage_dir).ok()?;
+                fs::create_dir_all(lock_path.parent()?).ok()?;
                 create(&path, &token).ok()?;
                 Some(RefreshLock { path, token })
             }

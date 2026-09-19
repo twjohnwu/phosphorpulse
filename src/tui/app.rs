@@ -9,7 +9,7 @@ use std::{
 use phosphorpulse::{atomic_write::write_atomic, config::model::Config};
 use serde_json::Value;
 
-use phosphorpulse::tui::{i18n::Lang, wizard::WizardStep};
+use phosphorpulse::tui::{i18n::{Key, Lang}, wizard::WizardStep};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScreenId {
@@ -45,6 +45,10 @@ pub enum UiMode {
     TemplateExportPath,
     TemplateImportPath,
     TemplateImportName,
+    CommandName,
+    CommandString,
+    CommandEdit,
+    ConfirmDeleteCommand,
     TemplateSaveOverwrite,
     TemplateImportOverwrite,
     TemplateExportOverwrite,
@@ -79,7 +83,10 @@ pub struct AppState {
     pub error: Option<String>,
     pub status: Option<String>,
     pub input: String,
+    pub input_error: Option<Key>,
     pub mode: UiMode,
+    pub pending_command: Option<String>,
+    pub command_notice: Option<String>,
     pub pending_name: String,
     pub pending_path: PathBuf,
     pub should_quit: bool,
@@ -112,9 +119,12 @@ impl AppState {
             error: None,
             status: None,
             input: String::new(),
+            input_error: None,
             should_quit: false,
             config_dir,
             mode: UiMode::Normal,
+            pending_command: None,
+            command_notice: None,
             pending_name: String::new(),
             pending_path: PathBuf::new(),
             codex_config: None,

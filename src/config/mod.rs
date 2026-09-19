@@ -1,11 +1,52 @@
 pub mod model;
 pub mod overrides;
 
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use serde_json::Value;
 
 use model::Config;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandSpec {
+    pub command: String,
+    pub timeout_ms: u64,
+    pub ttl_sec: u64,
+    pub max_width: usize,
+    pub preserve_colors: bool,
+}
+
+pub fn commands(cfg: &Value) -> BTreeMap<String, CommandSpec> {
+    cfg.get("commands")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, value)| {
+            let value = value.as_object()?;
+            let command = value.get("command")?.as_str()?;
+            Some((
+                name.clone(),
+                CommandSpec {
+                    command: command.into(),
+                    timeout_ms: value
+                        .get("timeoutMs")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1_000),
+                    ttl_sec: value.get("ttlSec").and_then(Value::as_u64).unwrap_or(5),
+                    max_width: value
+                        .get("maxWidth")
+                        .and_then(Value::as_u64)
+                        .and_then(|width| usize::try_from(width).ok())
+                        .unwrap_or(24),
+                    preserve_colors: value
+                        .get("preserveColors")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                },
+            ))
+        })
+        .collect()
+}
 
 pub struct LoadedConfig {
     pub path: PathBuf,
