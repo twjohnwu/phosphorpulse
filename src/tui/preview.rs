@@ -56,11 +56,13 @@ pub fn render_preview_at_columns(
                 .map(str::to_owned)
         })
     {
+        // Status rows carry their own leading space; pad one more cell so the
+        // bullets line up with the row text, as in the real terminal.
         rendered.push('\n');
         rendered.push_str(&gutter);
-        rendered.push_str("\x1b[1m● main\x1b[0m\n");
+        rendered.push_str(" \x1b[1;37m● main\x1b[0m\n");
         rendered.push_str(&gutter);
-        rendered.push_str("○ ");
+        rendered.push_str(" ○ ");
         rendered.push_str(content.trim());
         rendered.push('\n');
     }
