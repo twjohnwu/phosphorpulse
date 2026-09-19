@@ -37,11 +37,12 @@ pub struct TemplatesScreen;
 pub struct SettingsInstallScreen;
 pub struct SaveExitScreen;
 
-/// The first 14 IDs keep the frozen TS `listMainSegments()` order; the last 4
+/// The first 14 IDs keep the frozen TS `listMainSegments()` order; the last 5
 /// were added by the stdin-extra-segments change.
-const MAIN_SEGMENT_IDS: [&str; 18] = [
+const MAIN_SEGMENT_IDS: [&str; 19] = [
     "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node", "python", "version",
     "cost", "burn", "pomodoro", "flex", "session", "fastMode", "outputStyle", "thinking",
+    "limitModel",
 ];
 /// Frozen TS `listSubagentSegments()` inventory; picker choices must never be
 /// inferred from the main-line list.
@@ -85,11 +86,28 @@ fn horizontal_segments(segments: &[String], selected: usize, move_mode: bool) ->
 }
 
 fn pomodoro_work_min(s: &AppState) -> i64 {
-    let pomodoro = s.draft.0.get("pomodoro");
-    pomodoro
-        .and_then(|value| value.get("workMin"))
+    draft_i64(s, "pomodoro", "workMin").unwrap_or(25)
+}
+
+fn usage_refresh_sec(s: &AppState) -> i64 {
+    draft_i64(s, "usage", "refreshSec")
+        .filter(|value| (60..=600).contains(value))
+        .unwrap_or(300)
+}
+
+fn draft_i64(s: &AppState, section: &str, key: &str) -> Option<i64> {
+    s.draft
+        .0
+        .get(section)
+        .and_then(|value| value.get(key))
         .and_then(Value::as_i64)
-        .unwrap_or(25)
+}
+
+fn integer_setting_line(s: &AppState, marker: &str, key: &Key, value: i64) -> Line<'static> {
+    Line::from(format!(
+        "{marker} {}",
+        t(s.lang, key, &[("value", &value.to_string())])
+    ))
 }
 
 fn row_segment_line(
@@ -166,10 +184,11 @@ enum ColorsFocus {
     GaugeHotPct,
     GaugeColor(&'static str),
     PomodoroWorkMin,
+    UsageRefreshSec,
     DirPathDepth,
     NerdFont,
 }
-const COLORS_FOCUS: [ColorsFocus; 27] = [
+const COLORS_FOCUS: [ColorsFocus; 29] = [
     ColorsFocus::Depth,
     ColorsFocus::SegmentFg("model"),
     ColorsFocus::SegmentFg("effort"),
@@ -188,6 +207,7 @@ const COLORS_FOCUS: [ColorsFocus; 27] = [
     ColorsFocus::SegmentFg("fastMode"),
     ColorsFocus::SegmentFg("outputStyle"),
     ColorsFocus::SegmentFg("thinking"),
+    ColorsFocus::SegmentFg("limitModel"),
     ColorsFocus::GaugeWidth,
     ColorsFocus::GaugeWarnPct,
     ColorsFocus::GaugeHotPct,
@@ -195,10 +215,11 @@ const COLORS_FOCUS: [ColorsFocus; 27] = [
     ColorsFocus::GaugeColor("warn"),
     ColorsFocus::GaugeColor("hot"),
     ColorsFocus::PomodoroWorkMin,
+    ColorsFocus::UsageRefreshSec,
     ColorsFocus::DirPathDepth,
     ColorsFocus::NerdFont,
 ];
-const COLORS_SEPARATOR_BEFORE: [usize; 3] = [18, 24, 25];
+const COLORS_SEPARATOR_BEFORE: [usize; 3] = [19, 25, 27];
 
 fn colors_line_index(focus: usize) -> usize {
     focus
@@ -789,17 +810,18 @@ impl Screen for ColorsThemeScreen {
                         Span::styled(label, Style::default().fg(hex_color(&hex).unwrap_or(TEXT))),
                     ])
                 }
-                ColorsFocus::PomodoroWorkMin => {
-                    let work = pomodoro_work_min(s);
-                    Line::from(format!(
-                        "{marker} {}",
-                        t(
-                            s.lang,
-                            &Key::ColorsPomodoroWorkMin,
-                            &[("value", &work.to_string())]
-                        )
-                    ))
-                }
+                ColorsFocus::PomodoroWorkMin => integer_setting_line(
+                    s,
+                    marker,
+                    &Key::ColorsPomodoroWorkMin,
+                    pomodoro_work_min(s),
+                ),
+                ColorsFocus::UsageRefreshSec => integer_setting_line(
+                    s,
+                    marker,
+                    &Key::ColorsUsageRefreshSec,
+                    usage_refresh_sec(s),
+                ),
                 ColorsFocus::DirPathDepth => Line::from(format!(
                     "{marker} {}",
                     t(
@@ -903,6 +925,9 @@ impl Screen for ColorsThemeScreen {
                     }
                     ColorsFocus::PomodoroWorkMin => {
                         draft_ops::adjust_pomodoro_work_min(&s.draft, direction)
+                    }
+                    ColorsFocus::UsageRefreshSec => {
+                        draft_ops::adjust_usage_refresh_sec(&s.draft, direction)
                     }
                     ColorsFocus::DirPathDepth => {
                         draft_ops::adjust_dir_path_depth(&s.draft, direction)
@@ -1519,7 +1544,7 @@ mod tests {
     /// REQ-04 / S-04: picker inventories include the new main IDs without changing built-in rows.
     #[test]
     fn test_s04_picker_ids_and_builtin_rows() {
-        assert_eq!(MAIN_SEGMENT_IDS.len(), 18);
+        assert_eq!(MAIN_SEGMENT_IDS.len(), 19);
         assert_eq!(
             &MAIN_SEGMENT_IDS[..14],
             &[
@@ -1529,7 +1554,9 @@ mod tests {
         );
         assert_eq!(
             MAIN_SEGMENT_IDS.get(14..),
-            Some(["session", "fastMode", "outputStyle", "thinking"].as_slice())
+            Some(
+                ["session", "fastMode", "outputStyle", "thinking", "limitModel"].as_slice()
+            )
         );
         assert_eq!(
             SUBAGENT_SEGMENT_IDS,
@@ -1557,7 +1584,7 @@ mod tests {
     /// REQ-07 / S-08: Colors & Themes lists the new segment foreground controls.
     #[test]
     fn test_s08_colors_focus_lists_new_segments() {
-        assert_eq!(COLORS_FOCUS.len(), 27);
+        assert_eq!(COLORS_FOCUS.len(), 29);
 
         let pomodoro = COLORS_FOCUS
             .iter()
@@ -1581,9 +1608,13 @@ mod tests {
         ));
         assert!(matches!(
             COLORS_FOCUS.get(pomodoro + 5),
+            Some(ColorsFocus::SegmentFg("limitModel"))
+        ));
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro + 6),
             Some(ColorsFocus::GaugeWidth)
         ));
-        assert_eq!(COLORS_SEPARATOR_BEFORE, [18, 24, 25]);
+        assert_eq!(COLORS_SEPARATOR_BEFORE, [19, 25, 27]);
 
         let draft = crate::config::model::Config::defaults();
         let theme = builtin("matrix-tron");
@@ -1615,15 +1646,61 @@ mod tests {
         for (focus, expected) in [
             (0, 0),
             (17, 17),
-            (18, 19),
+            (18, 18),
             (19, 20),
             (23, 24),
-            (24, 26),
-            (25, 28),
-            (26, 29),
+            (24, 25),
+            (25, 27),
+            (26, 28),
+            (27, 30),
+            (28, 31),
         ] {
             assert_eq!(colors_line_index(focus), expected);
         }
-        assert_eq!(COLORS_FOCUS.len() + COLORS_SEPARATOR_BEFORE.len(), 30);
+        assert_eq!(COLORS_FOCUS.len() + COLORS_SEPARATOR_BEFORE.len(), 32);
+    }
+
+    /// REQ-05 / REQ-07 / S-05: limitModel and usage refresh controls occupy fixed TUI slots.
+    #[test]
+    fn test_s05_limit_model_tui_constants() {
+        assert_eq!(MAIN_SEGMENT_IDS.len(), 19);
+        let main_segment_ids: &[&str] = &MAIN_SEGMENT_IDS;
+        assert_eq!(main_segment_ids[18], "limitModel");
+        assert_eq!(COLORS_FOCUS.len(), 29);
+
+        let thinking = COLORS_FOCUS
+            .iter()
+            .position(|focus| matches!(focus, ColorsFocus::SegmentFg("thinking")))
+            .expect("thinking foreground focus");
+        assert!(matches!(
+            COLORS_FOCUS.get(thinking + 1),
+            Some(ColorsFocus::SegmentFg("limitModel"))
+        ));
+        assert!(matches!(
+            COLORS_FOCUS.get(thinking + 2),
+            Some(ColorsFocus::GaugeWidth)
+        ));
+
+        let pomodoro_work = COLORS_FOCUS
+            .iter()
+            .position(|focus| matches!(focus, ColorsFocus::PomodoroWorkMin))
+            .expect("pomodoro work minutes focus");
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro_work + 1),
+            Some(ColorsFocus::UsageRefreshSec)
+        ));
+        assert!(matches!(
+            COLORS_FOCUS.get(pomodoro_work + 2),
+            Some(ColorsFocus::DirPathDepth)
+        ));
+
+        assert_eq!(COLORS_SEPARATOR_BEFORE, [19, 25, 27]);
+        assert_eq!(COLORS_FOCUS.len() + 3, 32);
+
+        let draft = crate::config::model::Config::defaults();
+        assert_eq!(
+            crate::tui::draft_ops::effective_segment_fg(&draft, "limitModel"),
+            crate::tui::draft_ops::effective_segment_fg(&draft, "limit7d")
+        );
     }
 }

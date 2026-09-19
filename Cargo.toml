@@ -1,6 +1,6 @@
 [package]
 name = "phosphorpulse"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A configurable status-line renderer for coding agents"
 license = "MIT"
@@ -15,6 +15,7 @@ ratatui = "0.29"
 crossterm = "0.28"
 toml_edit = "0.22"
 plist = "1.7"
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 
 # The profile that 'dist' will build with
 [profile.dist]

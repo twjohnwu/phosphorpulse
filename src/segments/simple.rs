@@ -6,7 +6,7 @@ use crate::{
 };
 use crate::jsx::width::display_width;
 pub const DIM: &str = "\0text-dim\0";
-const MAX_STATUS_WIDTH: usize = 24;
+pub(crate) const MAX_STATUS_WIDTH: usize = 24;
 
 struct StatusText {
     session_prefix: &'static str,
@@ -137,16 +137,66 @@ fn countdown(r: i64) -> String {
     }
 }
 fn limit(label: &str, w: &Window, c: &RenderContext) -> Option<Segment> {
-    let p = w.used_percentage?;
-    let mut t = format!("{label} {} {}%", gauge(p, c.gauge_width), p.round() as i64);
-    if let Some(r) = w.resets_at {
+    w.used_percentage
+        .map(|p| limit_parts(label, p, w.resets_at, c))
+}
+pub(crate) fn limit_parts(
+    label: &str,
+    percent: f64,
+    resets_at: Option<i64>,
+    c: &RenderContext,
+) -> Segment {
+    let mut t = format!(
+        "{label} {} {}%",
+        gauge(percent, c.gauge_width),
+        percent.round() as i64
+    );
+    if let Some(r) = resets_at {
         t += &format!(" {DIM}↺{}", countdown(r));
     }
-    Some(Segment {
+    Segment {
         text: t,
-        fg: Some(gauge_color(p, c, false)),
+        fg: Some(gauge_color(percent, c, false)),
         bold: false,
-    })
+    }
+}
+
+enum Freshness {
+    Fresh,
+    Stale,
+    Expired,
+}
+
+pub(crate) fn limit_model(
+    cache: Option<&crate::usage::UsageCache>,
+    now: i64,
+    c: &RenderContext,
+) -> Segment {
+    let freshness = match cache
+        .and_then(|value| value.fetched_at)
+        .and_then(|fetched_at| now.checked_sub(fetched_at))
+    {
+        Some(0..=1_800_000) => Freshness::Fresh,
+        Some(1_800_001..=86_400_000) => Freshness::Stale,
+        _ => Freshness::Expired,
+    };
+    let active = cache.and_then(|value| value.limits.iter().find(|limit| limit.is_active));
+
+    match (freshness, active) {
+        (Freshness::Fresh, Some(limit)) => {
+            limit_parts(&limit.display_name, limit.percent, limit.resets_at, c)
+        }
+        (Freshness::Stale, Some(limit)) => {
+            let mut segment = limit_parts(&limit.display_name, limit.percent, limit.resets_at, c);
+            segment.fg = Some("text.dim");
+            segment
+        }
+        _ => Segment {
+            text: "--".into(),
+            fg: Some("text.dim"),
+            bold: false,
+        },
+    }
 }
 pub fn limit5h(c: &RenderContext) -> Option<Segment> {
     limit("5h", &c.five_hour, c)

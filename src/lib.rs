@@ -9,3 +9,4 @@ pub mod protocol;
 pub mod render;
 pub mod segments;
 pub mod tui;
+pub mod usage;

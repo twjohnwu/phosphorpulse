@@ -42,7 +42,7 @@ pub struct RenderContext {
     pub gauge_width: usize, pub warn_pct: f64, pub hot_pct: f64,
 }
 fn num(v: Option<&Value>) -> Option<f64> { match v? { Value::Number(n) => n.as_f64().filter(|x| x.is_finite()), Value::String(s) if !s.is_empty() => s.parse().ok().filter(|x: &f64| x.is_finite()), _ => None } }
-fn reset(v: Option<&Value>) -> Option<i64> {
+pub(crate) fn reset(v: Option<&Value>) -> Option<i64> {
  let value=v?;
  match value {
   Value::Number(_) => num(Some(value)).map(|x| (x * 1000.0) as i64),
@@ -51,7 +51,7 @@ fn reset(v: Option<&Value>) -> Option<i64> {
   _ => None,
  }
 }
-fn clean_text(s: Option<&str>) -> Option<String> {
+pub(crate) fn clean_text(s: Option<&str>) -> Option<String> {
  let cleaned: String = s?.chars().filter(|c| {
   !c.is_control()
    && !matches!(*c,
@@ -64,7 +64,7 @@ fn clean_text(s: Option<&str>) -> Option<String> {
  (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 // Date.parse-compatible enough for the ISO timestamps emitted by Claude Code.
-fn parse_iso_millis(s: &str) -> Option<i64> {
+pub(crate) fn parse_iso_millis(s: &str) -> Option<i64> {
  let (date, time) = s.split_once('T')?;
  let mut ds=date.split('-').map(str::parse::<i64>); let (y,mo,d)=(ds.next()?.ok()?,ds.next()?.ok()?,ds.next()?.ok()?);
  if !(1..=12).contains(&mo) { return None; }

@@ -85,13 +85,13 @@ fn python_pin(dir: Option<&str>) -> Option<String> {
     None
 }
 
-enum CommandResult {
+pub(crate) enum CommandResult {
     Output(String),
     TimedOut,
     Failed,
 }
 
-fn command_with_timeout(
+pub(crate) fn command_with_timeout(
     program: &'static str,
     args: &'static [&'static str],
     cwd: Option<String>,

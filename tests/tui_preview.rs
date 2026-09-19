@@ -296,3 +296,65 @@ fn test_s07_preview_sample_shows_extra_segments() {
         &["#phosphorpulse", "fast", "style:Concise", "no-think"],
     );
 }
+
+/// REQ-03 / S-06: Preview renders synthetic model-limit usage without reading,
+/// claiming, or spawning against the configured usage directory.
+#[test]
+fn test_s06_preview_limit_model_synthetic() {
+    fn strip_ansi(input: &str) -> String {
+        let bytes = input.as_bytes();
+        let mut plain = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+
+        while index < bytes.len() {
+            if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'[') {
+                index += 2;
+                while index < bytes.len() {
+                    let byte = bytes[index];
+                    index += 1;
+                    if (0x40..=0x7e).contains(&byte) {
+                        break;
+                    }
+                }
+            } else {
+                plain.push(bytes[index]);
+                index += 1;
+            }
+        }
+
+        String::from_utf8(plain).expect("stripping ANSI preserves UTF-8")
+    }
+
+    let temp = TempDir::new("s06-preview-limit-model");
+    let home = temp.path().join("home");
+    let config_dir = temp.path().join("config");
+    fs::create_dir_all(&home).expect("create temporary home");
+    fs::create_dir_all(&config_dir).expect("create temporary config directory");
+    let _environment = EnvGuard::use_temp_home(&home);
+    unsafe {
+        std::env::set_var("PPULSE_CONFIG_DIR", &config_dir);
+    }
+
+    let mut draft = serde_json::to_value(Config::defaults()).expect("serialize default config");
+    draft["rows"][0]["segments"] = json!(["model", "limitModel"]);
+
+    let preview = phosphorpulse::render::render_value_preview_at_columns(
+        phosphorpulse::tui::preview::main_sample(),
+        draft,
+        config_dir.clone(),
+        120,
+    );
+    let plain = strip_ansi(&preview);
+    let first_line = plain.lines().next().unwrap_or_default();
+
+    assert!(
+        first_line.contains("Fable")
+            && first_line.contains("65%")
+            && first_line.contains("↺5d17h"),
+        "preview first line should contain synthetic model-limit usage: {first_line:?}"
+    );
+    assert!(
+        !config_dir.join("usage").exists(),
+        "preview must not read, claim, or spawn usage refresh work"
+    );
+}

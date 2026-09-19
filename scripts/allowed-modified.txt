@@ -29,3 +29,5 @@ src/tui/preview.rs
 src/tui/draft_ops.rs
 src/tui/screens/common.rs
 tests/tui_preview.rs
+src/tui/i18n.rs
+src/config/model.rs

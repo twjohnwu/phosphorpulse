@@ -95,6 +95,8 @@ fn segment(
     c: &RenderContext,
     e: &external::Values,
     pomodoro: Option<&pomodoro::Pomodoro>,
+    usage: Option<&crate::usage::UsageCache>,
+    now: i64,
 ) -> Option<Segment> {
     match id {
         "model" => simple::model(c),
@@ -103,6 +105,7 @@ fn segment(
         "ctx" => simple::ctx(c),
         "limit5h" => simple::limit5h(c),
         "limit7d" => simple::limit7d(c),
+        "limitModel" => Some(simple::limit_model(usage, now, c)),
         "version" => simple::version(c),
         "cost" => simple::cost(c),
         "burn" => simple::burn(c),
@@ -199,6 +202,7 @@ fn render_value_at(
     let row_segments = (0..count)
         .map(|index| resolved_row_segments(&cfg, &template, index))
         .collect::<Vec<_>>();
+    let now = crate::clock::now_ms();
     let (need_git, need_node, need_python) =
         row_segments
             .iter()
@@ -232,6 +236,15 @@ fn render_value_at(
             fg: "text.dim",
         }),
     };
+    let needs_usage = row_segments.iter().flatten().any(|id| *id == "limitModel");
+    let usage = if needs_usage {
+        match mode {
+            RenderMode::Live => crate::usage::trigger::resolve_for_render(&config_dir, now),
+            RenderMode::Preview => Some(crate::usage::preview_cache(now)),
+        }
+    } else {
+        None
+    };
     let cols = columns.unwrap_or_else(|| {
         std::env::var("COLUMNS")
             .ok()
@@ -257,7 +270,7 @@ fn render_value_at(
                     if id == "flex" {
                         Some(row_builder::FLEX.into())
                     } else {
-                        segment(id, &c, &external, pomodoro.as_ref())
+                        segment(id, &c, &external, pomodoro.as_ref(), usage.as_ref(), now)
                             .map(|s| wrap(id, s, row, &cfg, &template, d))
                     }
                 })

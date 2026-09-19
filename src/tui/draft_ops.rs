@@ -145,7 +145,7 @@ fn effective_fg(draft: &Config, segment: &str) -> String {
         "model" | "dir" | "pomodoro" | "pomodoro.work" => "#00CF41",
         "effort" => "#008F11",
         "git" | "git.ok" | "ctx" | "ctx.ok" | "pomodoro.break" => "#00CDCD",
-        "limit5h" | "limit7d" | "ok" => "#00FF41",
+        "limit5h" | "limit7d" | "limitModel" | "ok" => "#00FF41",
         "node" | "python" => "#00E5FF",
         "version" => "#969696",
         "cost" | "burn" => "#008F11",
@@ -242,8 +242,9 @@ pub fn toggle_row_layout(draft: &Config, row: usize) -> Config {
     next
 }
 
-fn adjust_pomodoro(
+fn adjust_int(
     draft: &Config,
+    section: &str,
     key: &str,
     default: i64,
     delta: i64,
@@ -255,9 +256,9 @@ fn adjust_pomodoro(
     if direction == 0 {
         return next;
     }
-    let pomodoro = object_field(&mut next.0, "pomodoro");
-    let current = pomodoro.get(key).and_then(Value::as_i64).unwrap_or(default);
-    pomodoro.insert(
+    let values = object_field(&mut next.0, section);
+    let current = values.get(key).and_then(Value::as_i64).unwrap_or(default);
+    values.insert(
         key.into(),
         Value::from(clamp(current + delta * i64::from(direction), min, max)),
     );
@@ -265,11 +266,15 @@ fn adjust_pomodoro(
 }
 
 pub fn adjust_pomodoro_work_min(draft: &Config, direction: i8) -> Config {
-    adjust_pomodoro(draft, "workMin", 25, 5, 5, 90, direction)
+    adjust_int(draft, "pomodoro", "workMin", 25, 5, 5, 90, direction)
+}
+
+pub fn adjust_usage_refresh_sec(draft: &Config, direction: i8) -> Config {
+    adjust_int(draft, "usage", "refreshSec", 300, 60, 60, 600, direction)
 }
 
 pub fn adjust_pomodoro_refresh_sec(draft: &Config, direction: i8) -> Config {
-    adjust_pomodoro(draft, "refreshSec", 1, 1, 1, 60, direction)
+    adjust_int(draft, "pomodoro", "refreshSec", 1, 1, 1, 60, direction)
 }
 
 pub fn cycle_color_depth(draft: &Config, direction: i8) -> Config {

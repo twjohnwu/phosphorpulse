@@ -66,6 +66,27 @@ impl Config {
                 None => return Err("/pomodoro/workMin: must be an integer".into()),
             }
         }
+        if let Some(refresh_sec) = self
+            .0
+            .get("usage")
+            .and_then(|usage| usage.get("refreshSec"))
+        {
+            match refresh_sec.as_f64() {
+                Some(value) if value.fract() == 0.0 && value < 60.0 => {
+                    return Err(format!("/usage/refreshSec: must be >= 60, got {value}"));
+                }
+                Some(value) if value.fract() == 0.0 && value > 600.0 => {
+                    return Err(format!("/usage/refreshSec: must be <= 600, got {value}"));
+                }
+                Some(value) if value.fract() == 0.0 => {}
+                Some(value) => {
+                    return Err(format!(
+                        "/usage/refreshSec: must be an integer, got {value}"
+                    ));
+                }
+                None => return Err("/usage/refreshSec: must be an integer".into()),
+            }
+        }
         if let Some(segments) = self.0.get("segments") {
             let segments = segments.as_object().ok_or("/segments: must be an object")?;
             for (id, segment) in segments {

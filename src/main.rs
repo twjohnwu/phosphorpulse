@@ -8,6 +8,9 @@ fn main() {
             render_command(render::render_subagent)
         }
         [command] if command == "config" => config::config(),
+        [command] if command == "usage-refresh" => {
+            std::process::exit(phosphorpulse::usage::refresh_command())
+        }
         [command] if command == "migrate" => migrate_command(false),
         [command, flag] if command == "migrate" && flag == "--force" => migrate_command(true),
         [] => no_args(),
