@@ -44,7 +44,9 @@ pub fn render_preview_at_columns(
                 .map(str::to_owned)
         })
     {
-        rendered.push_str("subagent: ");
+        rendered.push('\n');
+        rendered.push_str("\x1b[1m● main\x1b[0m\n");
+        rendered.push_str("○ ");
         rendered.push_str(content.trim());
         rendered.push('\n');
     }
@@ -96,7 +98,7 @@ pub fn subagent_sample() -> Value {
         .unwrap_or_default()
         .as_millis() as i64;
     serde_json::json!({"tasks": [{
-        "name": "gondor-builder", "description": "build feature X",
+        "name": "subagent-name", "description": "build feature X",
         "model": "claude-sonnet-5", "contextWindowSize": 200_000,
         "tokenCount": 50_000, "startTime": now - 130_000, "effort": "medium"
     }]})
