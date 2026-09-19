@@ -15,6 +15,7 @@ use crate::tui::{
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use phosphorpulse::{
+    cmd::cache as cmd_cache,
     config::{self, model::Config},
     jsx::width::display_width,
     protocol,
@@ -883,10 +884,53 @@ fn remove_command_cache(config_dir: &Path, name: &str) {
         let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
-        if file_name.starts_with(&prefix) && file_name.ends_with(".json") {
+        let Some(rest) = file_name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some(hash) = rest.strip_suffix(".json") else {
+            continue;
+        };
+        // Only remove entries shaped like `cmd::cache_key`'s output
+        // (`{name}-{16 lowercase hex}.json`); a name that is itself a
+        // prefix of another command's name (e.g. `api` vs `api-status`)
+        // must not delete the longer command's cache.
+        if hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
             let _ = fs::remove_file(path);
         }
     }
+}
+
+/// Closes the "no diagnosability" review finding for `cmd:<name>`: looks up the most
+/// recent `lastError` recorded for `name`'s cache file(s), for display under the
+/// Colors screen's `command:` row. A command's cache is keyed by `{name}-{cwd hash}`
+/// (see `cmd::cache_key`), so more than one cwd may have a cache file for the same
+/// command name; the Colors screen has no cwd context of its own, so the first cache
+/// file carrying a `lastError` is shown. Read fresh on every `draw()` call — each cache
+/// file is capped at `cmd::MAX_CACHE_FILE_BYTES` (64 KiB) and this only runs for the
+/// command rows currently on screen, so the repeated read is cheap.
+fn cmd_last_error(config_dir: &Path, name: &str) -> Option<String> {
+    let entries = fs::read_dir(config_dir.join("commands")).ok()?;
+    let prefix = format!("{name}-");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some(rest) = file_name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some(hash) = rest.strip_suffix(".json") else {
+            continue;
+        };
+        if hash.len() == 16
+            && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && let Some(cache) = cmd_cache::read_cache(&path)
+            && let Some(last_error) = cache.last_error
+        {
+            return Some(last_error);
+        }
+    }
+    None
 }
 
 fn on_colors_confirm_delete(e: KeyEvent, s: &mut AppState) {
@@ -1030,7 +1074,17 @@ impl Screen for ColorsThemeScreen {
         let commands_empty = command_count == 0;
         let selected = s.selected().min(focus.len() - 1);
         let mut rows = Vec::new();
+        // The Colors screen's `command:` row grows one extra dim diagnostic line when
+        // `cmd_last_error` finds a `lastError`; `colors_line_index`/`focus.len() +
+        // separators.len()` don't know about that, so track how many extra lines were
+        // inserted before `selected` (to correct the scroll target) and in total (to
+        // correct `scrolled_list`'s total-line count) as we go.
+        let mut extra_lines_before_selected = 0usize;
+        let mut extra_lines_total = 0usize;
         for (index, item) in focus.iter().enumerate() {
+            if index == selected {
+                extra_lines_before_selected = extra_lines_total;
+            }
             if separators.contains(&index) {
                 if index > 27
                     && index < 27 + 6 * command_count
@@ -1045,7 +1099,7 @@ impl Screen for ColorsThemeScreen {
                 }
             }
             let marker = if index == selected { "▸" } else { " " };
-            rows.push(match item {
+            let line = match item {
                 ColorsFocus::Depth => Line::from(format!(
                     "{marker} {}",
                     t(
@@ -1277,7 +1331,20 @@ impl Screen for ColorsThemeScreen {
                         t(s.lang, &Key::ColorsNerdFont, &[("value", &value)])
                     ))
                 }
-            });
+            };
+            rows.push(line);
+            if let ColorsFocus::CmdCommand(name) = item
+                && let Some(last_error) = cmd_last_error(&s.config_dir, name)
+            {
+                rows.push(
+                    Line::from(format!(
+                        "  {}",
+                        t(s.lang, &Key::ColorsCmdLastError, &[("value", &last_error)])
+                    ))
+                    .style(Style::default().fg(crate::tui::screens::common::DIM)),
+                );
+                extra_lines_total += 1;
+            }
         }
         let input_prompt = command_input_prompt(s);
         let (list_area, input_area) = if input_prompt.is_some() {
@@ -1294,8 +1361,8 @@ impl Screen for ColorsThemeScreen {
         f.render_widget(
             scrolled_list(
                 rows,
-                colors_line_index(&s.draft, selected),
-                focus.len() + separators.len(),
+                colors_line_index(&s.draft, selected) + extra_lines_before_selected,
+                focus.len() + separators.len() + extra_lines_total,
                 list_area,
             )
             .style(Style::default().fg(TEXT)),

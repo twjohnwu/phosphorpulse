@@ -23,6 +23,7 @@ fn test_s02_key_schedule_display() {
             next_fetch_at: now + 5_000,
             command: "c".into(),
             output: Some("hi".into()),
+            last_error: None,
         }
     );
     assert_eq!(
@@ -32,6 +33,7 @@ fn test_s02_key_schedule_display() {
             next_fetch_at: now + 1_000,
             command: "c".into(),
             output: Some("hi".into()),
+            last_error: None,
         }
     );
     let old = CommandCache {
@@ -39,14 +41,16 @@ fn test_s02_key_schedule_display() {
         next_fetch_at: now - 1,
         command: "c".into(),
         output: Some("old".into()),
+        last_error: None,
     };
     assert_eq!(
-        schedule(RunOutcome::Failure, Some(&old), now, 5, "c"),
+        schedule(RunOutcome::Failure("boom".into()), Some(&old), now, 5, "c"),
         CommandCache {
             fetched_at: Some(now - 9_000),
             next_fetch_at: now + 30_000,
             command: "c".into(),
             output: Some("old".into()),
+            last_error: Some("boom".into()),
         }
     );
     let mismatched_old = CommandCache {
@@ -54,10 +58,11 @@ fn test_s02_key_schedule_display() {
         next_fetch_at: now - 1,
         command: "other".into(),
         output: Some("old".into()),
+        last_error: None,
     };
     assert_eq!(
         schedule(
-            RunOutcome::Failure,
+            RunOutcome::Failure("boom".into()),
             Some(&mismatched_old),
             now,
             5,
@@ -68,15 +73,17 @@ fn test_s02_key_schedule_display() {
             next_fetch_at: now + 30_000,
             command: "c".into(),
             output: None,
+            last_error: Some("boom".into()),
         }
     );
     assert_eq!(
-        schedule(RunOutcome::Failure, None, now, 5, "c"),
+        schedule(RunOutcome::Failure("boom".into()), None, now, 5, "c"),
         CommandCache {
             fetched_at: None,
             next_fetch_at: now + 30_000,
             command: "c".into(),
             output: None,
+            last_error: Some("boom".into()),
         }
     );
 

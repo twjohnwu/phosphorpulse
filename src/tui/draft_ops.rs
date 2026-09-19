@@ -263,13 +263,29 @@ fn effective_fg(draft: &Config, segment: &str) -> String {
         "session" => "#00CF41",
         "outputStyle" => "#969696",
         "fastMode" | "thinking" => "#FF7F50",
-        id if id.starts_with("cmd:") => "text",
+        id if id.starts_with("cmd:") => return theme_text_fg(draft),
         value => value,
     };
     match effective {
         "text" => "#00FF41".into(),
         value => value.into(),
     }
+}
+
+/// The active theme's `text` palette entry, matching how the renderer
+/// resolves the `text` role for `cmd:*` segments (see `render::mod::wrap`,
+/// which reads `s.fg == Some("text")` through `palette_color`).
+fn theme_text_fg(draft: &Config) -> String {
+    let active_template = draft
+        .0
+        .get("activeTemplate")
+        .and_then(Value::as_str)
+        .unwrap_or("matrix-tron");
+    phosphorpulse::render::themes::builtin(active_template)
+        .palette
+        .get("text")
+        .cloned()
+        .unwrap_or_else(|| "#00FF41".into())
 }
 
 pub fn add_row(draft: &Config, segments: Vec<String>) -> Config {

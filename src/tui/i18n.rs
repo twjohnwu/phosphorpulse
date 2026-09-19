@@ -122,6 +122,7 @@ message_table! {
     ColorsCmdTtlSec => ("colors.cmdTtlSec", "ttlSec: {value}", "ttlSec: {value}"),
     ColorsCmdMaxWidth => ("colors.cmdMaxWidth", "maxWidth: {value}", "maxWidth: {value}"),
     ColorsCmdPreserveColors => ("colors.cmdPreserveColors", "preserveColors: {value}", "preserveColors: {value}"),
+    ColorsCmdLastError => ("colors.cmdLastError", "error: {value}", "錯誤: {value}"),
     ColorsCmdAdd => ("colors.cmdAdd", "[a] add command", "[a] 新增指令"),
     ColorsCmdEmpty => ("colors.cmdEmpty", "No custom commands — [a] add", "尚無自訂指令 — [a] 新增"),
     ColorsHintCmdName => ("colors.hintCmdName", "Command name (Enter to continue, Esc to cancel)", "指令名稱（Enter 繼續，Esc 取消）"),

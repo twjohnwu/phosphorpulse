@@ -14,12 +14,25 @@ pub mod trigger;
 /// own stdin.
 const STDIN_FORWARD_MAX_BYTES: usize = 1_048_576;
 
+/// `render`'s detached-thread stdin forward (`trigger::spawn_refresh`) races `render`'s
+/// own process exit: a spawned thread that hasn't been joined is simply killed when
+/// `main` returns, so a slow-to-schedule write can lose the forwarded bytes entirely.
+/// Bytes up to this cap are written synchronously (before `render` can exit) instead;
+/// real payloads (Claude Code's transcript JSON) are 1-2 KB, well under it, so the
+/// detached thread now only runs for the rare oversized payload. 32 KiB comfortably
+/// fits a pipe's kernel buffer (64 KiB on macOS/Linux) without blocking the caller.
+const STDIN_SYNC_MAX_BYTES: usize = 32 * 1024;
+
 pub const CLAIM_WINDOW_MS: i64 = 15_000;
 pub const FAILURE_BACKOFF_MS: i64 = 30_000;
 pub const EXPIRED_AFTER_MS: i64 = 86_400_000;
 pub const MIN_FRESH_MS: i64 = 60_000;
 pub const MAX_OUTPUT_BYTES: usize = 4_096;
 pub const MAX_CACHE_FILE_BYTES: u64 = 65_536;
+
+/// Diagnostic strings stored in `CommandCache::last_error` are capped at this many bytes
+/// (char-boundary safe) so a chatty command can't bloat the cache file.
+const LAST_ERROR_CAP_BYTES: usize = 200;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -28,11 +41,16 @@ pub struct CommandCache {
     pub next_fetch_at: i64,
     pub command: String,
     pub output: Option<String>,
+    /// Short diagnostic from the most recent failed run (`None` on success, and `None`/
+    /// absent for cache files written before this field existed — `skip_serializing_if`
+    /// keeps a successful write byte-identical to the pre-diagnosability format).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_error: Option<String>,
 }
 
 pub enum RunOutcome {
     Success(String),
-    Failure,
+    Failure(String),
 }
 
 #[derive(PartialEq, Debug)]
@@ -141,7 +159,7 @@ pub fn refresh_command(name: &str, cwd: &str) -> i32 {
 
     let stdin_bytes = read_stdin_capped(STDIN_FORWARD_MAX_BYTES);
     let outcome = if cwd.is_empty() || !std::path::Path::new(cwd).is_dir() {
-        RunOutcome::Failure
+        RunOutcome::Failure("invalid working directory".to_owned())
     } else {
         run::run_with_stdin(
             &spec.command,
@@ -155,7 +173,7 @@ pub fn refresh_command(name: &str, cwd: &str) -> i32 {
     let old = cache::read_cache(&path);
     let code = match outcome {
         RunOutcome::Success(_) => 0,
-        RunOutcome::Failure => 4,
+        RunOutcome::Failure(_) => 4,
     };
     let new_cache = schedule(outcome, old.as_ref(), now, spec.ttl_sec, &spec.command);
     let _ = cache::write_cache(&path, &new_cache);
@@ -176,17 +194,27 @@ pub fn schedule(
             next_fetch_at: now.saturating_add(seconds_to_millis(ttl_sec)),
             command: command.to_owned(),
             output: Some(output),
+            last_error: None,
         },
-        RunOutcome::Failure => {
+        RunOutcome::Failure(diagnostic) => {
             let (fetched_at, output) = kept(old, command);
             CommandCache {
                 fetched_at,
                 next_fetch_at: now.saturating_add(FAILURE_BACKOFF_MS),
                 command: command.to_owned(),
                 output,
+                last_error: Some(clean_diagnostic(&diagnostic)),
             }
         }
     }
+}
+
+/// Filters a raw diagnostic string the same way `protocol::clean_text` filters render
+/// input (control chars and bidi/format marks), then truncates to `LAST_ERROR_CAP_BYTES`
+/// on a char boundary — the diagnostic may echo a child's stderr, which is untrusted text.
+fn clean_diagnostic(diagnostic: &str) -> String {
+    let cleaned = crate::protocol::clean_text(Some(diagnostic)).unwrap_or_default();
+    run::truncate_utf8(&cleaned, LAST_ERROR_CAP_BYTES).to_owned()
 }
 
 pub fn display_text(raw: &str, preserve_colors: bool, max_width: usize) -> String {

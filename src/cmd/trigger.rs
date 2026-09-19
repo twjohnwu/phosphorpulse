@@ -7,7 +7,9 @@ use std::{
 
 use crate::config::CommandSpec;
 
-use super::{CLAIM_WINDOW_MS, CommandCache, STDIN_FORWARD_MAX_BYTES, cache, cache_key};
+use super::{
+    CLAIM_WINDOW_MS, CommandCache, STDIN_FORWARD_MAX_BYTES, STDIN_SYNC_MAX_BYTES, cache, cache_key,
+};
 
 pub fn resolve_for_render(
     config_dir: &Path,
@@ -62,6 +64,7 @@ fn build_claim(
             next_fetch_at: now.saturating_add(CLAIM_WINDOW_MS),
             command: spec.command.clone(),
             output: None,
+            last_error: None,
         }
     }
 }
@@ -82,8 +85,20 @@ fn spawn_refresh(name: &str, cwd: Option<&str>, raw_stdin: &[u8]) {
     let Some(mut stdin) = child.stdin.take() else {
         return;
     };
-    let forwarded = raw_stdin[..raw_stdin.len().min(STDIN_FORWARD_MAX_BYTES)].to_vec();
+    let forwarded = &raw_stdin[..raw_stdin.len().min(STDIN_FORWARD_MAX_BYTES)];
+    // Write the bytes that fit within `STDIN_SYNC_MAX_BYTES` synchronously, before
+    // `render` (our caller) can exit and kill this thread mid-write (a detached thread
+    // dropped by an exiting `main` is not joined, so a lost race here used to hand the
+    // child an empty stdin). Real payloads are 1-2 KB, so this covers them without ever
+    // spawning a thread; only a payload that exceeds the sync cap still needs one for the
+    // remainder.
+    let (sync_part, rest) = forwarded.split_at(forwarded.len().min(STDIN_SYNC_MAX_BYTES));
+    let _ = stdin.write_all(sync_part);
+    if rest.is_empty() {
+        return;
+    }
+    let rest = rest.to_vec();
     thread::spawn(move || {
-        let _ = stdin.write_all(&forwarded);
+        let _ = stdin.write_all(&rest);
     });
 }

@@ -96,6 +96,7 @@ fn seed_claim(config_dir: &Path, key: &str, command: &str) {
         next_fetch_at: NOW + 15_000,
         command: command.to_owned(),
         output: Some("old".into()),
+        last_error: None,
     };
     let path = cache::cache_path(config_dir, key);
     fs::create_dir_all(path.parent().expect("cache path has a parent"))
@@ -189,6 +190,45 @@ fn assert_lock_released_and_not_reclaimed(config_dir: &Path, key: &str, label: &
         json!(NOW + 15_000),
         "S-05 case {label}: nextFetchAt must not be left at the render claim value"
     );
+}
+
+/// Bounded deadline for `assert_pid_dead_or_zombie`'s poll — matches `S04_POLL_TIMEOUT`'s
+/// order of magnitude for the same reason (a loaded CI runner needs headroom that a local
+/// run never notices).
+const PID_DEAD_POLL_TIMEOUT: Duration = Duration::from_millis(2_000);
+
+/// Polls until `pid` is either gone from the process table (`kill -0` fails) or a zombie
+/// (`ps -o stat=` reports a leading `Z`), up to `PID_DEAD_POLL_TIMEOUT`. Both outcomes mean
+/// the process-group kill landed; `kill -0` alone cannot tell the two apart from "still
+/// running", because a zombie still answers `kill -0` successfully until its parent (here,
+/// an OS-scheduled reparent-and-reap once `sh` dies, not something `cmd-refresh` controls
+/// for a grandchild it never directly parented) reaps it.
+fn assert_pid_dead_or_zombie(pid: &str, label: &str) {
+    let start = Instant::now();
+    loop {
+        let alive = Command::new("/bin/kill")
+            .args(["-0", pid])
+            .status()
+            .expect("run kill -0 probe")
+            .success();
+        if !alive {
+            return;
+        }
+        let stat = Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .expect("run ps stat probe");
+        if String::from_utf8_lossy(&stat.stdout).trim_start().starts_with('Z') {
+            return;
+        }
+        if start.elapsed() >= PID_DEAD_POLL_TIMEOUT {
+            panic!(
+                "S-05 case {label}: grandchild pid {pid} must be dead (or a zombie) after \
+                 process-group kill, within {PID_DEAD_POLL_TIMEOUT:?}"
+            );
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn cache_file_mode(config_dir: &Path, key: &str) -> u32 {
@@ -299,15 +339,13 @@ fn test_s05_refresh_subcommand() {
             !pid.is_empty(),
             "S-05 case {label}: gc.pid must have been written before the kill"
         );
-        let alive = Command::new("/bin/kill")
-            .args(["-0", &pid])
-            .status()
-            .expect("run kill -0 probe")
-            .success();
-        assert!(
-            !alive,
-            "S-05 case {label}: grandchild pid {pid} must be dead after process-group kill"
-        );
+        // `kill -0` alone is not sufficient: a SIGKILLed process is a zombie (and
+        // `kill -0` on a zombie still succeeds) until its parent gets reparented and
+        // reaped, which is an OS-scheduled event `cmd-refresh` does not control for a
+        // grandchild it never directly parented. Poll for either "no such process" or
+        // an observed zombie (`ps -o stat=` reports `Z`) — both mean the kill landed;
+        // only a live, non-zombie state after the deadline is a real failure.
+        assert_pid_dead_or_zombie(&pid, label);
     }
 
     // (4) undeclared name: exit 2, cache bytes untouched (never read).
@@ -458,7 +496,7 @@ fn test_s05_refresh_subcommand() {
         let label = "10";
         let d = TempDir::new(&format!("d{label}"));
         let p = TempDir::new(&format!("p{label}"));
-        let command = "printf '\\xff\\xfeok'";
+        let command = "printf '\\377\\376ok'";
         write_settings(d.path(), command, None);
         let key = cmd::cache_key("k8s", Some(&p.as_str()));
         seed_claim(d.path(), &key, command);
@@ -548,6 +586,49 @@ fn test_s05_refresh_subcommand() {
         );
         assert_lock_released_and_not_reclaimed(d.path(), &key, label);
     }
+}
+
+/// Regression test for a review finding (not an S-XX scenario): when the shell exits
+/// early while a grandchild keeps the stdout pipe open (`sleep 60 &` with no `wait`,
+/// unlike S-05 case 3's `wait`-based shape), the worker thread's `try_wait` succeeds as
+/// soon as the shell exits and must not empty the shared `Child` handle before the
+/// timeout branch might still need it to kill the process group. Confirms the grandchild
+/// is gone (or a zombie) after `cmd-refresh` exits, using the same
+/// `assert_pid_dead_or_zombie` poll as S-05 case 3.
+#[test]
+fn test_pgroup_kill_when_shell_exits_early() {
+    let d = TempDir::new("leaky_d");
+    let p = TempDir::new("leaky_p");
+    let label = "leaky";
+    let command = "sleep 60 & echo $! > gc.pid; printf ok";
+    write_settings(d.path(), command, Some(300));
+    let key = cmd::cache_key("k8s", Some(&p.as_str()));
+    seed_claim(d.path(), &key, command);
+
+    let result = run_cmd_refresh(d.path(), "k8s", &p.as_str(), stdin_json(&p.as_str()));
+
+    // Observed: the grandchild keeps the stdout pipe open past the shell's exit, so the
+    // read never sees EOF before `timeoutMs` fires — same outer failure shape as S-05
+    // case 3 (timeout kill): exit 4, old cache kept, nextFetchAt bumped by the timeout
+    // path's `now+30_000`, lock released.
+    assert_eq!(result.output.status.code(), Some(4), "case {label} exit code");
+    assert_empty_stdio(&result, label);
+    let cache = read_cache_json(d.path(), &key);
+    assert_eq!(cache["output"], json!("old"), "case {label} output");
+    assert_eq!(
+        cache["nextFetchAt"],
+        json!(NOW + 30_000),
+        "case {label} nextFetchAt"
+    );
+    assert_lock_released_and_not_reclaimed(d.path(), &key, label);
+
+    let pid_path = p.path().join("gc.pid");
+    let pid = fs::read_to_string(&pid_path)
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    assert!(!pid.is_empty(), "case {label}: gc.pid must have been written before the kill");
+    assert_pid_dead_or_zombie(&pid, label);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -769,6 +850,7 @@ fn test_s04_render_trigger_and_claim() {
                 next_fetch_at: NOW + 4_000,
                 command: S04_COMMAND.to_owned(),
                 output: Some("cached".into()),
+                last_error: None,
             },
         );
         let before = read_cache_bytes(d.path(), &key);
@@ -809,6 +891,7 @@ fn test_s04_render_trigger_and_claim() {
                 next_fetch_at: NOW - 1,
                 command: S04_COMMAND.to_owned(),
                 output: Some("cached".into()),
+                last_error: None,
             },
         );
 
@@ -853,6 +936,7 @@ fn test_s04_render_trigger_and_claim() {
                 next_fetch_at: NOW + 10_000,
                 command: S04_COMMAND.to_owned(),
                 output: None,
+                last_error: None,
             },
         );
         let before = read_cache_bytes(d.path(), &key);
@@ -946,6 +1030,7 @@ fn test_s04_render_trigger_and_claim() {
                 next_fetch_at: NOW + 4_000,
                 command: "false".to_owned(),
                 output: Some("stale-cmd".into()),
+                last_error: None,
             },
         );
         write_lock(d.path(), &key, "other");
