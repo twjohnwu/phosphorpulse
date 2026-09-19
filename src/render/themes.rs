@@ -21,7 +21,7 @@ fn common(p: BTreeMap<String, String>) -> Theme {
         rows: vec![
             Row {
                 layout: "auto".into(),
-                segments: vec!["model", "effort", "git", "dir", "flex", "ctx"]
+                segments: vec!["model", "effort", "git", "dir", "flex", "limitModel"]
                     .into_iter()
                     .map(str::to_string)
                     .collect(),
@@ -29,7 +29,7 @@ fn common(p: BTreeMap<String, String>) -> Theme {
             Row {
                 layout: "auto".into(),
                 segments: vec![
-                    "limit5h", "pomodoro", "node", "python", "flex", "burn", "version", "limit7d",
+                    "limit5h", "pomodoro", "version", "node", "python", "flex", "ctx", "limit7d",
                 ]
                 .into_iter()
                 .map(str::to_string)

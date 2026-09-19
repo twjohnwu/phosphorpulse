@@ -681,12 +681,12 @@ fn builtin_matrix_tron_exports_and_loads_without_template_file() {
         .expect("exported built-in passes import validation");
     assert_eq!(
         imported["rows"][1]["segments"],
-        serde_json::json!(["limit5h", "pomodoro", "node", "python", "flex", "burn", "version", "limit7d"])
+        serde_json::json!(["limit5h", "pomodoro", "version", "node", "python", "flex", "ctx", "limit7d"])
     );
     assert_eq!(
         templates_io::load_template("matrix-tron", &templates)
             .expect("load built-in template")["rows"][1]["segments"],
-        serde_json::json!(["limit5h", "pomodoro", "node", "python", "flex", "burn", "version", "limit7d"])
+        serde_json::json!(["limit5h", "pomodoro", "version", "node", "python", "flex", "ctx", "limit7d"])
     );
 
     let _ = std::fs::remove_dir_all(root);

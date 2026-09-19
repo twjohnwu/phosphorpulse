@@ -31,3 +31,4 @@ src/tui/screens/common.rs
 tests/tui_preview.rs
 src/tui/i18n.rs
 src/config/model.rs
+tests/tui_assembly.rs
