@@ -63,6 +63,8 @@ TUI 的 **Settings & Install** 畫面或首次執行的 setup wizard 可自動�
 
 必要的 configuration keys 為 `style`、`activeTemplate`、`colorDepth`、`rows`、`subagent` 與 `gauge`。選用 keys 為 `pomodoro` 與 `segments`。
 
+`usage.source` 控制背景 usage refresher 的資料來源：`auto`（預設）在 `~/.claude.json` 裡 Claude Code 自己的 cached usage 夠新（15 分鐘以內）時優先使用，否則 fall back 到 API；`local` 永遠讀取該 local cache，不呼叫 API；`api` 永遠呼叫 API。
+
 ## 內建 themes
 
 內建 themes 為 `matrix-tron`（預設，green/cyan）、`solarized-dark` 與 `solarized-light`。完整細節請見 [themes and templates documentation](docs/themes.zh-TW.md)。

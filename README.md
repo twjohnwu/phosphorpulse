@@ -63,6 +63,8 @@ The configuration directory is `$PPULSE_CONFIG_DIR` when set; otherwise it is `~
 
 Required configuration keys are `style`, `activeTemplate`, `colorDepth`, `rows`, `subagent`, and `gauge`. Optional keys are `pomodoro` and `segments`.
 
+`usage.source` controls where the background usage refresher gets data from: `auto` (default) prefers Claude Code's own cached usage in `~/.claude.json` when it's fresh (15 minutes or less) and falls back to the API otherwise; `local` always reads that local cache and never calls the API; `api` always calls the API.
+
 ## Built-in themes
 
 The built-in themes are `matrix-tron` (the default, green/cyan), `solarized-dark`, and `solarized-light`. See [themes and templates documentation](docs/themes.md) for the full details.

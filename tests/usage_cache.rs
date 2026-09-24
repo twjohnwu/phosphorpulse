@@ -86,7 +86,7 @@ fn test_s01_parse_and_schedule() {
         schedule(FetchOutcome::RateLimited(Some(0)), Some(&old), now, 300,),
         UsageCache {
             fetched_at: old.fetched_at,
-            next_fetch_at: now + 1_000,
+            next_fetch_at: now + 300_000,
             limits: old.limits.clone(),
         }
     );

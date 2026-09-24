@@ -180,13 +180,16 @@ pub(crate) fn limit_model(
         Some(1_800_001..=86_400_000) => Freshness::Stale,
         _ => Freshness::Expired,
     };
+    // Prefer the limit for the model in use; otherwise fall back to the first
+    // per-model weekly limit so the gauge stays visible, dimmed.
     let active = cache.and_then(|value| value.limits.iter().find(|limit| limit.is_active));
+    let shown = active.or_else(|| cache.and_then(|value| value.limits.first()));
 
-    match (freshness, active) {
-        (Freshness::Fresh, Some(limit)) => {
+    match (freshness, shown) {
+        (Freshness::Fresh, Some(limit)) if limit.is_active => {
             limit_parts(&limit.display_name, limit.percent, limit.resets_at, c)
         }
-        (Freshness::Stale, Some(limit)) => {
+        (Freshness::Fresh | Freshness::Stale, Some(limit)) => {
             let mut segment = limit_parts(&limit.display_name, limit.percent, limit.resets_at, c);
             segment.fg = Some("text.dim");
             segment

@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod fetch;
+pub mod local;
 pub mod lock;
 pub mod trigger;
 
@@ -86,10 +87,17 @@ pub fn schedule(
             next_fetch_at: now.saturating_add(seconds_to_millis(refresh_sec)),
             limits,
         },
-        FetchOutcome::RateLimited(retry_after) => kept_cache(
-            old,
-            now.saturating_add(seconds_to_millis(retry_after.unwrap_or(300).clamp(1, 3600))),
-        ),
+        FetchOutcome::RateLimited(retry_after) => {
+            // A `retry-after` below 60s (including 0, which the undocumented
+            // usage endpoint returns while hard rate-limited) is treated as
+            // absent, so a bug in that header can't collapse the backoff to
+            // a near-instant retry loop.
+            let retry_after_sec = retry_after.filter(|&seconds| seconds >= 60).unwrap_or(300);
+            kept_cache(
+                old,
+                now.saturating_add(seconds_to_millis(retry_after_sec.clamp(60, 3600))),
+            )
+        }
         FetchOutcome::AuthFailed => kept_cache(old, now.saturating_add(300_000)),
         FetchOutcome::OtherFailure => kept_cache(old, now.saturating_add(30_000)),
     }
@@ -120,6 +128,46 @@ pub fn read_refresh_sec(config_dir: &Path) -> u64 {
         .unwrap_or(300)
 }
 
+/// Where the background refresher gets usage data from. Set via
+/// `usage.source` in `settings.json`; missing/invalid falls back to `Auto`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageSource {
+    /// Prefer Claude Code's own local cache when it's fresh (<=15min old
+    /// and for the active account); otherwise fall back to the API.
+    Auto,
+    /// Always read Claude Code's local cache; never call the API.
+    Local,
+    /// Always call the API (today's behavior).
+    Api,
+}
+
+/// 15 minutes, in milliseconds — how stale the local cache may be before
+/// `Auto` falls back to the API.
+const AUTO_FRESH_WINDOW_MS: i64 = 15 * 60 * 1000;
+
+pub fn read_usage_source(config_dir: &Path) -> UsageSource {
+    cache::read_bounded(&config_dir.join("settings.json"), 65_536)
+        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+        .and_then(|settings| settings.get("usage")?.get("source")?.as_str().map(str::to_string))
+        .map(|source| match source.as_str() {
+            "local" => UsageSource::Local,
+            "api" => UsageSource::Api,
+            _ => UsageSource::Auto,
+        })
+        .unwrap_or(UsageSource::Auto)
+}
+
+/// Builds the cache entry for a successful fetch (API or local), sharing the
+/// `next_fetch_at` scheduling but letting the caller choose `fetched_at` —
+/// the local source reports the file's own `fetchedAtMs`, not `now`.
+fn success_cache(fetched_at: i64, now: i64, refresh_sec: u64, limits: Vec<UsageLimit>) -> UsageCache {
+    UsageCache {
+        fetched_at: Some(fetched_at),
+        next_fetch_at: now.saturating_add(seconds_to_millis(refresh_sec)),
+        limits,
+    }
+}
+
 pub fn preview_cache(now: i64) -> UsageCache {
     UsageCache {
         fetched_at: Some(now),
@@ -145,9 +193,35 @@ pub fn refresh_command() -> i32 {
 
     let now = crate::clock::now_ms();
     let refresh_sec = read_refresh_sec(&config_dir);
+    let source = read_usage_source(&config_dir);
     let cache_path = cache::cache_path(&config_dir);
     let old = cache::read_cache(&cache_path);
 
+    let (new_cache, code) = match source {
+        UsageSource::Local => local_result(now, refresh_sec, old.as_ref()),
+        UsageSource::Api => api_result(now, refresh_sec, old.as_ref()),
+        UsageSource::Auto => match local::read_local_usage() {
+            // A future fetchedAtMs is bogus, not fresh forever.
+            Some(local_usage)
+                if (0..=AUTO_FRESH_WINDOW_MS)
+                    .contains(&now.saturating_sub(local_usage.fetched_at_ms)) =>
+            {
+                (
+                    success_cache(local_usage.fetched_at_ms, now, refresh_sec, local_usage.limits),
+                    0,
+                )
+            }
+            _ => api_result(now, refresh_sec, old.as_ref()),
+        },
+    };
+    let _ = cache::write_cache(&cache_path, &new_cache);
+    lock.release();
+    code
+}
+
+/// Calls the API, exactly like `refresh_command` did before `usage.source`
+/// existed.
+fn api_result(now: i64, refresh_sec: u64, old: Option<&UsageCache>) -> (UsageCache, i32) {
     let outcome = fetch::obtain_token()
         .map(|token| fetch::fetch_usage(&token))
         .unwrap_or(FetchOutcome::AuthFailed);
@@ -157,9 +231,18 @@ pub fn refresh_command() -> i32 {
         FetchOutcome::AuthFailed => 2,
         FetchOutcome::OtherFailure => 4,
     };
+    (schedule(outcome, old, now, refresh_sec), code)
+}
 
-    let new_cache = schedule(outcome, old.as_ref(), now, refresh_sec);
-    let _ = cache::write_cache(&cache_path, &new_cache);
-    lock.release();
-    code
+/// Reads Claude Code's own cached usage; never calls the API or reads the
+/// token. Missing/malformed/mismatched data keeps the old cache and retries
+/// in 30s, the same as `OtherFailure`.
+fn local_result(now: i64, refresh_sec: u64, old: Option<&UsageCache>) -> (UsageCache, i32) {
+    match local::read_local_usage() {
+        Some(usage) => (
+            success_cache(usage.fetched_at_ms, now, refresh_sec, usage.limits),
+            0,
+        ),
+        None => (schedule(FetchOutcome::OtherFailure, old, now, refresh_sec), 4),
+    }
 }
