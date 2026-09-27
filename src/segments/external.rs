@@ -93,7 +93,7 @@ pub(crate) enum CommandResult {
 
 pub(crate) fn command_with_timeout(
     program: &'static str,
-    args: &'static [&'static str],
+    args: &[&str],
     cwd: Option<String>,
     timeout_ms: u64,
 ) -> CommandResult {

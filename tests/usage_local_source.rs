@@ -138,6 +138,22 @@ impl CaseDir {
         path
     }
 
+    fn write_expired_token_file(&self) -> PathBuf {
+        let path = self.path.join("credentials.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "claudeAiOauth": {
+                    "accessToken": "test-token",
+                    "expiresAt": NOW - 3_600_000
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write credentials");
+        path
+    }
+
     fn run(&self) -> Output {
         self.run_with_token_file(&self.missing_token_file())
     }
@@ -339,6 +355,18 @@ fn test_auto_source_stale_local_falls_back_to_api() {
     assert_eq!(cache["fetchedAt"], json!(NOW - 600_000));
     assert_eq!(cache["nextFetchAt"], json!(NOW + 30_000));
     assert_eq!(cache["limits"][0]["displayName"], json!("OldModel"));
+}
+
+/// RED-first evidence: before the fix, this fails with exit code 4, not 2,
+/// because the expired token was sent to the API.
+#[test]
+fn test_api_source_expired_token_never_sent() {
+    let case = CaseDir::new("api-expired-token");
+    case.write_settings(Some("api"));
+    let token_file = case.write_expired_token_file();
+
+    let output = case.run_with_token_file(&token_file);
+    assert_eq!(output.status.code(), Some(2), "stderr: {:?}", output.stderr);
 }
 
 /// REQ: `usage.source: "auto"` treats a `fetchedAtMs` in the future as

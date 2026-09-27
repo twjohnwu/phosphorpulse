@@ -18,6 +18,14 @@ fn token_from_json(contents: &str) -> Option<String> {
     if token.is_empty() {
         None
     } else {
+        if let Some(expires_at) = value
+            .get("claudeAiOauth")
+            .and_then(|oauth| oauth.get("expiresAt"))
+            .and_then(Value::as_i64)
+            && expires_at <= crate::clock::now_ms()
+        {
+            return None;
+        }
         Some(token.to_string())
     }
 }
@@ -34,6 +42,25 @@ pub fn obtain_token() -> Option<String> {
         }
     }
     if cfg!(target_os = "macos") {
+        // Two accounts can leave matching keychain items; prefer the current user's item.
+        if let Some(user) = std::env::var("USER").ok()
+            && let CommandResult::Output(output) = command_with_timeout(
+                "security",
+                &[
+                    "find-generic-password",
+                    "-s",
+                    "Claude Code-credentials",
+                    "-a",
+                    &user,
+                    "-w",
+                ],
+                None,
+                5_000,
+            )
+            && let Some(token) = token_from_json(&output)
+        {
+            return Some(token);
+        }
         if let CommandResult::Output(output) = command_with_timeout(
             "security",
             &["find-generic-password", "-s", "Claude Code-credentials", "-w"],
