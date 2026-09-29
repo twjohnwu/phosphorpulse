@@ -66,6 +66,14 @@ impl Config {
                 None => return Err("/pomodoro/workMin: must be an integer".into()),
             }
         }
+        if self
+            .0
+            .get("pomodoro")
+            .and_then(|pomodoro| pomodoro.get("blockDuringRest"))
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err("/pomodoro/blockDuringRest: must be a boolean".into());
+        }
         if let Some(refresh_sec) = self
             .0
             .get("usage")

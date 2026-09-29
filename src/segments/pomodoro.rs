@@ -4,7 +4,7 @@ use serde_json::{json, Map, Value};
 
 use crate::{atomic_write, clock, protocol::RenderContext};
 
-const MAX_STATE_FILE_BYTES: u64 = 64 * 1024;
+pub(crate) const MAX_STATE_FILE_BYTES: u64 = 64 * 1024;
 const WORK_DEFAULT_MIN: i64 = 25;
 const SHORT_BREAK_MIN: i64 = 5;
 const LONG_BREAK_MIN: i64 = 15;
@@ -13,7 +13,7 @@ const IDLE_STOP_MS: i64 = 10 * 60_000;
 const NOTIFY_RATE_LIMIT_MS: i64 = 30_000;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Phase {
+pub(crate) enum Phase {
     Work,
     ShortBreak,
     LongBreak,
@@ -30,7 +30,7 @@ impl Phase {
             _ => None,
         }
     }
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Work => "work",
             Self::ShortBreak => "shortBreak",
@@ -38,7 +38,7 @@ impl Phase {
             Self::Stopped => "stopped",
         }
     }
-    fn duration_ms(self, work_min: f64) -> Option<f64> {
+    pub(crate) fn duration_ms(self, work_min: f64) -> Option<f64> {
         Some(match self {
             Self::Work => work_min * 60_000.0,
             Self::ShortBreak => SHORT_BREAK_MIN as f64 * 60_000.0,
@@ -49,11 +49,11 @@ impl Phase {
 }
 
 #[derive(Clone)]
-struct State {
-    phase: Phase,
+pub(crate) struct State {
+    pub(crate) phase: Phase,
     round: f64,
-    phase_start_ms: f64,
-    last_activity_ms: f64,
+    pub(crate) phase_start_ms: f64,
+    pub(crate) last_activity_ms: f64,
     sessions: Map<String, Value>,
     last_notified_at_ms: Option<f64>,
 }
@@ -76,7 +76,7 @@ fn finite_nonnegative(doc: &Map<String, Value>, key: &str) -> Option<f64> {
 }
 
 // Deliberately mirrors the TS top-level-only validator: session entries remain opaque.
-fn parse_state(value: Value) -> Option<State> {
+pub(crate) fn parse_state(value: Value) -> Option<State> {
     let doc = value.as_object()?;
     let phase = Phase::parse(doc.get("phase")?.as_str()?)?;
     let round = finite_nonnegative(doc, "round")?;
@@ -109,7 +109,7 @@ fn read_state(session_id: &str, state_dir: &Path) -> Option<State> {
     parse_state(serde_json::from_slice(&fs::read(path).ok()?).ok()?)
 }
 
-fn work_min(config: &Value) -> f64 {
+pub(crate) fn work_min(config: &Value) -> f64 {
     config
         .get("pomodoro")
         .and_then(|v| v.get("workMin"))
@@ -145,7 +145,7 @@ fn activity_changed(
     changed
 }
 
-fn advance(mut state: State, now: f64, changed: bool, work_min: f64) -> (State, bool) {
+pub(crate) fn advance(mut state: State, now: f64, changed: bool, work_min: f64) -> (State, bool) {
     if state.phase == Phase::Stopped {
         if changed {
             state.phase = Phase::Work;
@@ -308,4 +308,32 @@ pub fn resolve(ctx: &RenderContext, config: &Value, config_dir: &Path) -> Pomodo
             "pomodoro.break"
         },
     }
+}
+
+pub struct Projection {
+    pub phase: &'static str,
+    pub round: f64,
+    pub rest_remaining_ms: Option<f64>,
+}
+
+pub fn project(state: Value, now_ms: f64, work_min: f64) -> Option<Projection> {
+    let state = parse_state(state)?;
+    let (next, _) = advance(state, now_ms, false, work_min);
+    let rest_remaining_ms = match next.phase {
+        Phase::ShortBreak | Phase::LongBreak => next
+            .phase
+            .duration_ms(work_min)
+            .map(|duration| next.phase_start_ms + duration - now_ms),
+        _ => None,
+    };
+    Some(Projection {
+        phase: next.phase.as_str(),
+        round: next.round,
+        rest_remaining_ms,
+    })
+}
+
+pub fn format_remaining(ms: f64) -> String {
+    let secs = (ms.max(0.0) / 1000.0).ceil() as i64;
+    format!("{:02}:{:02}", secs / 60, secs % 60)
 }
