@@ -180,6 +180,17 @@ pub fn toggle_command_bool(draft: &Config, name: &str, key: &str, default: bool)
     next
 }
 
+pub fn toggle_pomodoro_block_during_rest(draft: &Config) -> Config {
+    let mut next = draft.clone();
+    let pomodoro = object_field(&mut next.0, "pomodoro");
+    let current = pomodoro
+        .get("blockDuringRest")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    pomodoro.insert("blockDuringRest".into(), Value::Bool(!current));
+    next
+}
+
 pub fn set_command_string(draft: &Config, name: &str, command: &str) -> Config {
     let mut next = draft.clone();
     let Some(command_object) = command_object_mut(&mut next, name) else {

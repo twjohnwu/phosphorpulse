@@ -238,6 +238,7 @@ pub enum ColorsFocus {
     GaugeHotPct,
     GaugeColor(&'static str),
     PomodoroWorkMin,
+    PomodoroBlockDuringRest,
     UsageRefreshSec,
     CmdFg(String),
     CmdCommand(String),
@@ -250,7 +251,7 @@ pub enum ColorsFocus {
     NerdFont,
 }
 
-const BASE_COLORS_FOCUS: [ColorsFocus; 27] = [
+const BASE_COLORS_FOCUS: [ColorsFocus; 28] = [
     ColorsFocus::Depth,
     ColorsFocus::SegmentFg("model"),
     ColorsFocus::SegmentFg("effort"),
@@ -277,6 +278,7 @@ const BASE_COLORS_FOCUS: [ColorsFocus; 27] = [
     ColorsFocus::GaugeColor("warn"),
     ColorsFocus::GaugeColor("hot"),
     ColorsFocus::PomodoroWorkMin,
+    ColorsFocus::PomodoroBlockDuringRest,
     ColorsFocus::UsageRefreshSec,
 ];
 
@@ -303,9 +305,10 @@ pub fn colors_focus(draft: &Config) -> Vec<ColorsFocus> {
 
 pub fn colors_separators(draft: &Config) -> Vec<usize> {
     let command_count = configured_commands(draft).len();
-    let mut separators = vec![19, 25, 27];
-    separators.extend((1..command_count).map(|index| 27 + 6 * index));
-    separators.push(28 + 6 * command_count);
+    let base = BASE_COLORS_FOCUS.len();
+    let mut separators = vec![19, 25, base];
+    separators.extend((1..command_count).map(|index| base + 6 * index));
+    separators.push(base + 1 + 6 * command_count);
     separators
 }
 
@@ -1009,6 +1012,9 @@ fn colors_adjustment(s: &AppState, current: &ColorsFocus, direction: i8) -> Opti
             draft.0.insert("nerdFont".into(), Value::Bool(!enabled));
             Some(draft)
         }
+        ColorsFocus::PomodoroBlockDuringRest => {
+            Some(draft_ops::toggle_pomodoro_block_during_rest(&s.draft))
+        }
         ColorsFocus::CmdAdd | ColorsFocus::CmdCommand(_) => None,
     }
 }
@@ -1029,15 +1035,21 @@ fn on_colors_normal(e: KeyEvent, s: &mut AppState) -> Action {
             s.mode = UiMode::CommandName;
         }
         KeyCode::Enter => {
-            if let ColorsFocus::CmdCommand(name) = current {
-                let command = configured_commands(&s.draft)
-                    .get(&name)
-                    .and_then(|spec| protocol::clean_text(Some(&spec.command)))
-                    .unwrap_or_default();
-                s.input = command;
-                s.input_error = None;
-                s.pending_command = Some(name);
-                s.mode = UiMode::CommandEdit;
+            match current {
+                ColorsFocus::CmdCommand(name) => {
+                    let command = configured_commands(&s.draft)
+                        .get(&name)
+                        .and_then(|spec| protocol::clean_text(Some(&spec.command)))
+                        .unwrap_or_default();
+                    s.input = command;
+                    s.input_error = None;
+                    s.pending_command = Some(name);
+                    s.mode = UiMode::CommandEdit;
+                }
+                ColorsFocus::PomodoroBlockDuringRest => {
+                    s.draft = draft_ops::toggle_pomodoro_block_during_rest(&s.draft);
+                }
+                _ => {}
             }
         }
         KeyCode::Char('d') => {
@@ -1072,6 +1084,7 @@ impl Screen for ColorsThemeScreen {
         let separators = colors_separators(&s.draft);
         let command_count = configured_commands(&s.draft).len();
         let commands_empty = command_count == 0;
+        let base = BASE_COLORS_FOCUS.len();
         let selected = s.selected().min(focus.len() - 1);
         let mut rows = Vec::new();
         // The Colors screen's `command:` row grows one extra dim diagnostic line when
@@ -1086,9 +1099,9 @@ impl Screen for ColorsThemeScreen {
                 extra_lines_before_selected = extra_lines_total;
             }
             if separators.contains(&index) {
-                if index > 27
-                    && index < 27 + 6 * command_count
-                    && (index - 27) % 6 == 0
+                if index > base
+                    && index < base + 6 * command_count
+                    && (index - base) % 6 == 0
                 {
                     rows.push(Line::default());
                 } else {
@@ -1194,6 +1207,32 @@ impl Screen for ColorsThemeScreen {
                     &Key::ColorsPomodoroWorkMin,
                     pomodoro_work_min(s),
                 ),
+                ColorsFocus::PomodoroBlockDuringRest => {
+                    let enabled = s
+                        .draft
+                        .0
+                        .get("pomodoro")
+                        .and_then(|pomodoro| pomodoro.get("blockDuringRest"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let value = t(
+                        s.lang,
+                        &if enabled {
+                            Key::ColorsPomodoroBlockDuringRestOn
+                        } else {
+                            Key::ColorsPomodoroBlockDuringRestOff
+                        },
+                        &[],
+                    );
+                    Line::from(format!(
+                        "{marker} {}",
+                        t(
+                            s.lang,
+                            &Key::ColorsPomodoroBlockDuringRest,
+                            &[("value", &value)]
+                        )
+                    ))
+                }
                 ColorsFocus::UsageRefreshSec => integer_setting_line(
                     s,
                     marker,
@@ -2098,7 +2137,7 @@ mod tests {
     #[test]
     fn test_s08_colors_focus_lists_new_segments() {
         let d = Config::defaults();
-        assert_eq!(colors_focus(&d).len(), 30);
+        assert_eq!(colors_focus(&d).len(), 31);
 
         let focus = colors_focus(&d);
         let pomodoro = focus
@@ -2129,7 +2168,7 @@ mod tests {
             focus.get(pomodoro + 6),
             Some(ColorsFocus::GaugeWidth)
         ));
-        assert_eq!(colors_separators(&d), [19, 25, 27, 28]);
+        assert_eq!(colors_separators(&d), [19, 25, 28, 29]);
 
         let active_template = d
             .0
@@ -2172,8 +2211,8 @@ mod tests {
             (24, 25),
             (25, 27),
             (26, 28),
-            (27, 30),
-            (28, 32),
+            (27, 29),
+            (28, 31),
         ] {
             assert_eq!(colors_line_index(&d, focus), expected);
         }
@@ -2187,7 +2226,7 @@ mod tests {
         let main_segment_ids = main_segment_ids(&Config::defaults());
         assert_eq!(main_segment_ids.len(), 19);
         assert_eq!(main_segment_ids[18], "limitModel");
-        assert_eq!(colors_focus(&d).len(), 30);
+        assert_eq!(colors_focus(&d).len(), 31);
 
         let focuses = colors_focus(&d);
 
@@ -2210,19 +2249,23 @@ mod tests {
             .expect("pomodoro work minutes focus");
         assert!(matches!(
             focuses.get(pomodoro_work + 1),
-            Some(ColorsFocus::UsageRefreshSec)
+            Some(ColorsFocus::PomodoroBlockDuringRest)
         ));
         assert!(matches!(
             focuses.get(pomodoro_work + 2),
-            Some(ColorsFocus::CmdAdd)
+            Some(ColorsFocus::UsageRefreshSec)
         ));
         assert!(matches!(
             focuses.get(pomodoro_work + 3),
+            Some(ColorsFocus::CmdAdd)
+        ));
+        assert!(matches!(
+            focuses.get(pomodoro_work + 4),
             Some(ColorsFocus::DirPathDepth)
         ));
 
-        assert_eq!(colors_separators(&d), [19, 25, 27, 28]);
-        assert_eq!(colors_focus(&d).len() + 4, 34);
+        assert_eq!(colors_separators(&d), [19, 25, 28, 29]);
+        assert_eq!(colors_focus(&d).len() + 4, 35);
 
         assert_eq!(
             crate::tui::draft_ops::effective_segment_fg(&d, "limitModel"),
@@ -2253,18 +2296,18 @@ mod tests {
         assert_eq!(main2[20], "cmd:zeta");
 
         let focus0 = colors_focus(&d0);
-        assert_eq!(focus0.len(), 30);
-        assert_eq!(focus0[27], ColorsFocus::CmdAdd);
-        assert_eq!(focus0[28], ColorsFocus::DirPathDepth);
-        assert_eq!(focus0[29], ColorsFocus::NerdFont);
-        assert_eq!(colors_separators(&d0), [19, 25, 27, 28]);
+        assert_eq!(focus0.len(), 31);
+        assert_eq!(focus0[28], ColorsFocus::CmdAdd);
+        assert_eq!(focus0[29], ColorsFocus::DirPathDepth);
+        assert_eq!(focus0[30], ColorsFocus::NerdFont);
+        assert_eq!(colors_separators(&d0), [19, 25, 28, 29]);
 
         let focus2 = colors_focus(&d2);
-        assert_eq!(focus2.len(), 42);
-        assert_eq!(focus2[27], ColorsFocus::CmdFg("alpha".into()));
-        assert_eq!(focus2[33], ColorsFocus::CmdFg("zeta".into()));
-        assert_eq!(focus2[39], ColorsFocus::CmdAdd);
-        assert_eq!(colors_separators(&d2), [19, 25, 27, 33, 40]);
+        assert_eq!(focus2.len(), 43);
+        assert_eq!(focus2[28], ColorsFocus::CmdFg("alpha".into()));
+        assert_eq!(focus2[34], ColorsFocus::CmdFg("zeta".into()));
+        assert_eq!(focus2[40], ColorsFocus::CmdAdd);
+        assert_eq!(colors_separators(&d2), [19, 25, 28, 34, 41]);
 
         let active_template = d2
             .0
@@ -2276,5 +2319,165 @@ mod tests {
             crate::tui::draft_ops::effective_segment_fg(&d2, "cmd:alpha"),
             theme.palette["text"]
         );
+    }
+
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new_with_kind(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+            crossterm::event::KeyEventKind::Press,
+        )
+    }
+
+    fn draw_lines(state: &AppState, width: u16, height: u16) -> Vec<String> {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
+        terminal
+            .draw(|frame| ColorsThemeScreen::new().draw(frame, state))
+            .expect("draw screen");
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|y| {
+                let mut line = String::new();
+                let mut skip = 0usize;
+                for x in 0..width {
+                    if skip > 0 {
+                        skip -= 1;
+                        continue;
+                    }
+                    let symbol = buffer.cell((x, y)).expect("cell").symbol();
+                    skip = crate::jsx::width::display_width(symbol).saturating_sub(1);
+                    line.push_str(symbol);
+                }
+                line
+            })
+            .collect()
+    }
+
+    fn block_during_rest(draft: &Config) -> Option<bool> {
+        draft
+            .0
+            .get("pomodoro")
+            .and_then(|pomodoro| pomodoro.get("blockDuringRest"))
+            .and_then(Value::as_bool)
+    }
+
+    /// REQ-05 / S-06
+    #[test]
+    fn test_s06_pomodoro_block_toggle_row() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = std::env::temp_dir().join(format!(
+            "phosphorpulse-s06-home-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&home).expect("create temp HOME");
+        let old_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &home) };
+
+        let result = std::panic::catch_unwind(|| {
+            let defaults = Config::defaults();
+            let focus = colors_focus(&defaults);
+            let work_min = focus
+                .iter()
+                .position(|item| matches!(item, ColorsFocus::PomodoroWorkMin))
+                .expect("pomodoro work minutes focus");
+            assert_eq!(focus[work_min + 1], ColorsFocus::PomodoroBlockDuringRest);
+
+            for (pomodoro, expected) in [
+                (serde_json::json!({}), [true, false, true]),
+                (
+                    serde_json::json!({"blockDuringRest": true}),
+                    [false, true, false],
+                ),
+            ] {
+                let mut draft = Config::defaults();
+                draft.0.insert("pomodoro".into(), pomodoro);
+                let mut state = AppState::new(draft, ScreenId::ColorsTheme);
+                state.set_selected(work_min + 1);
+                let mut screen = ColorsThemeScreen::new();
+                for (code, want) in [KeyCode::Right, KeyCode::Left, KeyCode::Enter]
+                    .into_iter()
+                    .zip(expected)
+                {
+                    screen.on_key(press(code), &mut state);
+                    assert_eq!(block_during_rest(&state.draft), Some(want));
+                }
+            }
+
+            for (lang, label, on, off) in [
+                (
+                    crate::tui::i18n::Lang::En,
+                    "block prompts during break",
+                    "on",
+                    "off",
+                ),
+                (
+                    crate::tui::i18n::Lang::ZhTw,
+                    "休息時擋下 prompt",
+                    "開啟",
+                    "關閉",
+                ),
+            ] {
+                for (value, shown) in [(false, off), (true, on)] {
+                    let mut draft = Config::defaults();
+                    draft.0.insert(
+                        "pomodoro".into(),
+                        serde_json::json!({"blockDuringRest": value}),
+                    );
+                    let mut state = AppState::new(draft, ScreenId::ColorsTheme);
+                    state.lang = lang;
+                    state.set_selected(work_min + 1);
+                    let lines = draw_lines(&state, 100, 60);
+                    let row = lines
+                        .iter()
+                        .find(|line| line.contains(label))
+                        .unwrap_or_else(|| panic!("row containing {label:?}"));
+                    assert!(row.contains(shown), "row {row:?} shows {shown:?}");
+                }
+            }
+            assert!(
+                !home.join(".claude").join("settings.json").exists(),
+                "preview must not write ~/.claude/settings.json"
+            );
+
+            // Two commands: the second command group is preceded by a blank line, not a dash rule.
+            let mut draft = Config::defaults();
+            draft.0.insert(
+                "commands".into(),
+                serde_json::json!({"zeta": {"command": "a"}, "alpha": {"command": "b"}}),
+            );
+            let focus = colors_focus(&draft);
+            assert_eq!(focus[34], ColorsFocus::CmdFg("zeta".into()));
+            let mut state = AppState::new(draft, ScreenId::ColorsTheme);
+            state.set_selected(34);
+            let lines = draw_lines(&state, 100, 60);
+            let zeta = lines
+                .iter()
+                .position(|line| line.contains("cmd:zeta"))
+                .expect("zeta group first row");
+            assert!(zeta > 0);
+            assert!(
+                lines[zeta - 1].trim().is_empty(),
+                "line before second command group is blank, got {:?}",
+                lines[zeta - 1]
+            );
+        });
+
+        unsafe {
+            match old_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&home);
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
     }
 }
