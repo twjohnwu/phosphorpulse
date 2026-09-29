@@ -6,6 +6,7 @@ pub mod cmd;
 pub mod config;
 pub mod jsx;
 pub mod migrate;
+pub mod pomodoro_gate;
 pub mod protocol;
 pub mod render;
 pub mod segments;

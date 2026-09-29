@@ -16,6 +16,9 @@ fn main() {
         }
         [command] if command == "migrate" => migrate_command(false),
         [command, flag] if command == "migrate" && flag == "--force" => migrate_command(true),
+        [command] if command == "pomodoro-gate" => {
+            std::process::exit(phosphorpulse::pomodoro_gate::run())
+        }
         [] => no_args(),
         _ => {}
     }

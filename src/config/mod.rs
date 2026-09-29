@@ -98,16 +98,30 @@ pub fn load() -> Result<LoadedConfig, String> {
     let mut document: Value =
         serde_json::from_str(&text).map_err(|error| format!("invalid JSON: {error}"))?;
     let env_paths = overrides::apply(&mut document);
-    let config: Config =
-        serde_json::from_value(document).map_err(|error| format!("invalid config: {error}"))?;
-    config
-        .validate_renderable()
-        .map_err(|error| format!("invalid config: {error}"))?;
+    let config = build_config(document)?;
     Ok(LoadedConfig {
         path,
         config,
         env_paths,
     })
+}
+
+pub fn load_file_only() -> Result<Config, String> {
+    let path = settings_path();
+    let text = crate::usage::cache::read_bounded(&path, 65_536)
+        .ok_or_else(|| "cannot read config file".to_string())?;
+    let document: Value =
+        serde_json::from_str(&text).map_err(|error| format!("invalid JSON: {error}"))?;
+    build_config(document)
+}
+
+fn build_config(document: Value) -> Result<Config, String> {
+    let config: Config =
+        serde_json::from_value(document).map_err(|error| format!("invalid config: {error}"))?;
+    config
+        .validate_renderable()
+        .map_err(|error| format!("invalid config: {error}"))?;
+    Ok(config)
 }
 
 pub fn default_config() -> Config {
