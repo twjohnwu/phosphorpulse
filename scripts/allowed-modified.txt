@@ -46,3 +46,7 @@ tests/cmd_segment.rs
 tests/cmd_refresh.rs
 tests/tui_commands.rs
 src/cmd/run.rs
+src/tui/settings_writer.rs
+src/pomodoro_gate.rs
+tests/pomodoro_gate.rs
+tests/pomodoro_gate_settings.rs
