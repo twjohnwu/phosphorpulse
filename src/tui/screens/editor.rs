@@ -2040,7 +2040,10 @@ impl Screen for SaveExitScreen {
                 s.error = Some(err.to_string());
                 return Action::Redraw;
             }
-            let _ = settings_writer::maybe_rewrite_claude_settings(&s.draft);
+            if let Err(err) = settings_writer::maybe_rewrite_claude_settings(&s.draft) {
+                s.error = Some(err.to_string());
+                return Action::Redraw;
+            }
             return Action::Quit;
         }
         Action::Redraw
