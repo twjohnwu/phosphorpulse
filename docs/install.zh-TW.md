@@ -69,6 +69,20 @@ Read this in: [English](install.md)
 
 ## 3. 將它連接至 Claude Code
 
+### Nerd Font（選用）
+
+Segment 圖示需要 Nerd Font。若你的 terminal 還沒使用 Nerd Font，請從官方 [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts) 專案安裝 **MesloLGS Nerd Font Mono**，再把 terminal 字型設為它。不想安裝字型的話，在 wizard 的 Nerd Font 畫面回答 `n`。
+
+- Homebrew：`brew install --cask font-meslo-lg-nerd-font`
+- 手動：下載 [Meslo.zip（v3.5.1）](https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/Meslo.zip)，或下方四個檔案，然後安裝（macOS 上雙擊每個檔案，按 **安裝字體**）。
+
+| 檔案 | 連結 |
+|---|---|
+| MesloLGSNerdFontMono-Regular.ttf | [下載](https://github.com/ryanoasis/nerd-fonts/raw/v3.5.1/patched-fonts/Meslo/S/MesloLGSNerdFontMono-Regular.ttf) |
+| MesloLGSNerdFontMono-Bold.ttf | [下載](https://github.com/ryanoasis/nerd-fonts/raw/v3.5.1/patched-fonts/Meslo/S/MesloLGSNerdFontMono-Bold.ttf) |
+| MesloLGSNerdFontMono-Italic.ttf | [下載](https://github.com/ryanoasis/nerd-fonts/raw/v3.5.1/patched-fonts/Meslo/S/MesloLGSNerdFontMono-Italic.ttf) |
+| MesloLGSNerdFontMono-BoldItalic.ttf | [下載](https://github.com/ryanoasis/nerd-fonts/raw/v3.5.1/patched-fonts/Meslo/S/MesloLGSNerdFontMono-BoldItalic.ttf) |
+
 選擇 wizard 或 manual edit 其中一種方式。
 
 ### Wizard
