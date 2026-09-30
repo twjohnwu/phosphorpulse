@@ -68,8 +68,15 @@ fn palette_color<'a>(value: &'a str, t: &'a Theme) -> &'a str {
         t.palette.get(value).map(String::as_str).unwrap_or(value)
     }
 }
+// Gauge segments: a configured fg replaces only the normal "ok" color, so
+// warn/hot/dim thresholds stay visible.
+fn is_gauge(id: &str) -> bool {
+    matches!(id, "limit5h" | "limit7d" | "limitModel" | "ctx")
+}
 fn wrap(id: &str, s: Segment, row: Option<&Value>, cfg: &Value, t: &Theme, d: &str) -> String {
     let fg = if id.starts_with("cmd:") && s.fg == Some("text.dim") {
+        s.fg
+    } else if is_gauge(id) && !matches!(s.fg, Some("ok" | "ctx.ok")) {
         s.fg
     } else {
         configured_color(id, row, cfg, "fg").or(s.fg)
