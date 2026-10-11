@@ -35,6 +35,11 @@ pub fn transcript_role(task: &Value, transcript_path: Option<&str>) -> Option<St
 
 #[derive(Clone, Debug, Default)]
 pub struct Window { pub used_percentage: Option<f64>, pub resets_at: Option<i64> }
+/// Claude Code `prompt_cache`; only usable when it carries `expires_at` (unix seconds).
+#[derive(Clone, Debug, Default)]
+pub struct PromptCache {
+    pub warm: Option<bool>, pub ttl: Option<String>, pub expires_at: i64, pub recache_tokens_if_cold: Option<i64>,
+}
 #[derive(Clone, Debug, Default)]
 pub struct RenderContext {
     pub session_name: Option<String>, pub fast_mode: Option<bool>, pub thinking_enabled: Option<bool>,
@@ -45,6 +50,7 @@ pub struct RenderContext {
     pub cache_read_input_tokens: Option<f64>, pub cache_creation_input_tokens: Option<f64>,
     pub five_hour: Window, pub seven_day: Window, pub total_cost_usd: Option<f64>, pub total_duration_ms: Option<f64>,
     pub gauge_width: usize, pub warn_pct: f64, pub hot_pct: f64,
+    pub prompt_cache: Option<PromptCache>,
 }
 fn num(v: Option<&Value>) -> Option<f64> { match v? { Value::Number(n) => n.as_f64().filter(|x| x.is_finite()), Value::String(s) if !s.is_empty() => s.parse().ok().filter(|x: &f64| x.is_finite()), _ => None } }
 pub(crate) fn reset(v: Option<&Value>) -> Option<i64> {
@@ -90,7 +96,7 @@ impl RenderContext {
   let get = |p: &[&str]| -> Option<&Value> { let mut x=raw; for k in p { x=x.get(*k)?; } Some(x) };
   let cfg = |p: &[&str]| -> Option<&Value> { let mut x=config?; for k in p { x=x.get(*k)?; } Some(x) };
   let win = |name| Window { used_percentage:num(get(&["rate_limits",name,"used_percentage"])), resets_at:reset(get(&["rate_limits",name,"resets_at"])) };
-  Self { session_name:clean_text(get(&["session_name"]).and_then(Value::as_str)), fast_mode:get(&["fast_mode"]).and_then(Value::as_bool), thinking_enabled:get(&["thinking","enabled"]).and_then(Value::as_bool), output_style:clean_text(get(&["output_style","name"]).and_then(Value::as_str)), nerd_font:cfg(&["nerdFont"]).and_then(Value::as_bool).unwrap_or(false), model_display_name:get(&["model","display_name"]).and_then(Value::as_str).map(str::to_owned), effort_level:get(&["effort","level"]).and_then(Value::as_str).map(str::to_owned), cwd:get(&["cwd"]).or_else(||get(&["workspace","current_dir"])).and_then(Value::as_str).map(str::to_owned), path_depth:num(cfg(&["segments","dir","pathDepth"])).map(|n|n as usize).unwrap_or(99), version:get(&["version"]).and_then(Value::as_str).map(str::to_owned), session_id:get(&["session_id"]).and_then(Value::as_str).map(str::to_owned), context_used_percentage:num(get(&["context_window","used_percentage"])), total_input_tokens:num(get(&["context_window","total_input_tokens"])), total_output_tokens:num(get(&["context_window","total_output_tokens"])), cache_read_input_tokens:num(get(&["context_window","current_usage","cache_read_input_tokens"])), cache_creation_input_tokens:num(get(&["context_window","current_usage","cache_creation_input_tokens"])), five_hour:win("five_hour"), seven_day:win("seven_day"), total_cost_usd:num(get(&["cost","total_cost_usd"])), total_duration_ms:num(get(&["cost","total_duration_ms"])), gauge_width:num(cfg(&["gauge","barWidth"])).map(|n|n as usize).unwrap_or(20), warn_pct:num(cfg(&["gauge","warnPct"])).unwrap_or(65.), hot_pct:num(cfg(&["gauge","hotPct"])).unwrap_or(85.) }
+  Self { session_name:clean_text(get(&["session_name"]).and_then(Value::as_str)), fast_mode:get(&["fast_mode"]).and_then(Value::as_bool), thinking_enabled:get(&["thinking","enabled"]).and_then(Value::as_bool), output_style:clean_text(get(&["output_style","name"]).and_then(Value::as_str)), nerd_font:cfg(&["nerdFont"]).and_then(Value::as_bool).unwrap_or(false), model_display_name:get(&["model","display_name"]).and_then(Value::as_str).map(str::to_owned), effort_level:get(&["effort","level"]).and_then(Value::as_str).map(str::to_owned), cwd:get(&["cwd"]).or_else(||get(&["workspace","current_dir"])).and_then(Value::as_str).map(str::to_owned), path_depth:num(cfg(&["segments","dir","pathDepth"])).map(|n|n as usize).unwrap_or(99), version:get(&["version"]).and_then(Value::as_str).map(str::to_owned), session_id:get(&["session_id"]).and_then(Value::as_str).map(str::to_owned), context_used_percentage:num(get(&["context_window","used_percentage"])), total_input_tokens:num(get(&["context_window","total_input_tokens"])), total_output_tokens:num(get(&["context_window","total_output_tokens"])), cache_read_input_tokens:num(get(&["context_window","current_usage","cache_read_input_tokens"])), cache_creation_input_tokens:num(get(&["context_window","current_usage","cache_creation_input_tokens"])), five_hour:win("five_hour"), seven_day:win("seven_day"), total_cost_usd:num(get(&["cost","total_cost_usd"])), total_duration_ms:num(get(&["cost","total_duration_ms"])), gauge_width:num(cfg(&["gauge","barWidth"])).map(|n|n as usize).unwrap_or(20), warn_pct:num(cfg(&["gauge","warnPct"])).unwrap_or(65.), hot_pct:num(cfg(&["gauge","hotPct"])).unwrap_or(85.), prompt_cache:get(&["prompt_cache","expires_at"]).and_then(|v|num(Some(v))).map(|expires_at| PromptCache { warm:get(&["prompt_cache","warm"]).and_then(Value::as_bool), ttl:get(&["prompt_cache","ttl"]).and_then(Value::as_str).map(str::to_owned), expires_at:expires_at as i64, recache_tokens_if_cold:num(get(&["prompt_cache","recache_tokens_if_cold"])).map(|n|n as i64) }) }
  }
 }
 pub fn read_stdin_json() -> Result<(Value, Vec<u8>), String> { let mut input=Vec::new(); io::stdin().read_to_end(&mut input).map_err(|e|format!("cannot read stdin: {e}"))?; let value=serde_json::from_slice(&input).map_err(|e|e.to_string())?; Ok((value, input)) }

@@ -4,7 +4,7 @@ use crate::{
     cmd, config,
     protocol::RenderContext,
     segments::{
-        external, pomodoro,
+        cache, external, pomodoro,
         simple::{self, DIM, Segment},
     },
 };
@@ -118,6 +118,7 @@ fn segment(
         "limit5h" => simple::limit5h(c),
         "limit7d" => simple::limit7d(c),
         "limitModel" => Some(simple::limit_model(usage, now, c)),
+        "cache" => cache::segment(c, now),
         "version" => simple::version(c),
         "cost" => simple::cost(c),
         "burn" => simple::burn(c),
@@ -256,6 +257,9 @@ fn render_value_at(
             fg: "text.dim",
         }),
     };
+    if matches!(mode, RenderMode::Live) {
+        cache::persist(&c, &config_dir, now);
+    }
     let needs_usage = row_segments.iter().flatten().any(|id| *id == "limitModel");
     let usage = if needs_usage {
         match mode {

@@ -19,6 +19,17 @@ fn main() {
         [command] if command == "pomodoro-gate" => {
             std::process::exit(phosphorpulse::pomodoro_gate::run())
         }
+        [command, rest @ ..] if command == "cache-state" => {
+            let config_dir = config::settings_path()
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_default();
+            std::process::exit(phosphorpulse::segments::cache::state_command(
+                rest,
+                &config_dir,
+                phosphorpulse::clock::now_ms(),
+            ))
+        }
         [] => no_args(),
         _ => {}
     }

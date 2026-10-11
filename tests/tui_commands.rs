@@ -185,7 +185,7 @@ fn test_s07_add_edit_delete() {
             insert_after: false,
             position: 0,
         };
-        picker_state.set_selected(19);
+        picker_state.set_selected(20);
         let picker_buffer = draw(&RowsSegmentsScreen::new(), &picker_state);
         assert!(
             rendered(&picker_buffer).contains("> cmd:battery"),

@@ -63,7 +63,7 @@ pub struct Pomodoro {
     pub fg: &'static str,
 }
 
-fn valid_session_id(id: &str) -> bool {
+pub(crate) fn valid_session_id(id: &str) -> bool {
     !id.is_empty()
         && id
             .bytes()

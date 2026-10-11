@@ -46,13 +46,13 @@ pub struct TemplatesScreen;
 pub struct SettingsInstallScreen;
 pub struct SaveExitScreen;
 
-/// The first 14 IDs keep the frozen TS `listMainSegments()` order; the last 5
-/// were added by the stdin-extra-segments change.
-const fn builtin_main_segment_ids() -> [&'static str; 19] {
+/// The first 14 IDs keep the frozen TS `listMainSegments()` order; the next 5
+/// were added by the stdin-extra-segments change; `cache` was appended after them.
+const fn builtin_main_segment_ids() -> [&'static str; 20] {
     [
         "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node", "python",
         "version", "cost", "burn", "pomodoro", "flex", "session", "fastMode", "outputStyle",
-        "thinking", "limitModel",
+        "thinking", "limitModel", "cache",
     ]
 }
 
@@ -2099,7 +2099,7 @@ mod tests {
     #[test]
     fn test_s04_picker_ids_and_builtin_rows() {
         let ids = main_segment_ids(&Config::defaults());
-        assert_eq!(ids.len(), 19);
+        assert_eq!(ids.len(), 20);
         assert_eq!(
             ids[..14].iter().map(String::as_str).collect::<Vec<_>>(),
             [
@@ -2109,7 +2109,7 @@ mod tests {
         );
         assert_eq!(
             ids[14..].iter().map(String::as_str).collect::<Vec<_>>(),
-            ["session", "fastMode", "outputStyle", "thinking", "limitModel"]
+            ["session", "fastMode", "outputStyle", "thinking", "limitModel", "cache"]
         );
         assert_eq!(
             SUBAGENT_SEGMENT_IDS,
@@ -2226,7 +2226,7 @@ mod tests {
     fn test_s05_limit_model_tui_constants() {
         let d = Config::defaults();
         let main_segment_ids = main_segment_ids(&Config::defaults());
-        assert_eq!(main_segment_ids.len(), 19);
+        assert_eq!(main_segment_ids.len(), 20);
         assert_eq!(main_segment_ids[18], "limitModel");
         assert_eq!(colors_focus(&d).len(), 31);
 
@@ -2289,13 +2289,13 @@ mod tests {
         );
 
         let main0 = main_segment_ids(&d0);
-        assert_eq!(main0.len(), 19);
+        assert_eq!(main0.len(), 20);
         assert_eq!(main0[18], "limitModel");
 
         let main2 = main_segment_ids(&d2);
-        assert_eq!(main2.len(), 21);
-        assert_eq!(main2[19], "cmd:alpha");
-        assert_eq!(main2[20], "cmd:zeta");
+        assert_eq!(main2.len(), 22);
+        assert_eq!(main2[20], "cmd:alpha");
+        assert_eq!(main2[21], "cmd:zeta");
 
         let focus0 = colors_focus(&d0);
         assert_eq!(focus0.len(), 31);
