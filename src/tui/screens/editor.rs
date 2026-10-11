@@ -73,7 +73,7 @@ pub fn main_segment_ids(draft: &Config) -> Vec<String> {
 }
 /// Frozen TS `listSubagentSegments()` inventory; picker choices must never be
 /// inferred from the main-line list.
-const SUBAGENT_SEGMENT_IDS: [&str; 7] = [
+const SUBAGENT_SEGMENT_IDS: [&str; 8] = [
     "name",
     "desc",
     "model",
@@ -81,6 +81,7 @@ const SUBAGENT_SEGMENT_IDS: [&str; 7] = [
     "elapsed",
     "effort",
     "tokenCount",
+    "activity",
 ];
 const BUILTIN_TEMPLATE_NAMES: [&str; 3] = ["matrix-tron", "solarized-dark", "solarized-light"];
 
@@ -2120,6 +2121,7 @@ mod tests {
                 "elapsed",
                 "effort",
                 "tokenCount",
+                "activity",
             ]
         );
 

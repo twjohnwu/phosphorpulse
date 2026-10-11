@@ -394,11 +394,21 @@ pub fn render_subagent_value(raw: Value, cfg: Value) -> String {
             task,
             raw.get("transcript_path").and_then(Value::as_str),
         );
+        let transcript_role = crate::protocol::transcript_role(
+            task,
+            raw.get("transcript_path").and_then(Value::as_str),
+        );
         let name = identity.as_deref().or(detail);
         let mut parts = Vec::new();
         for id in &ids {
             let rendered = match *id {
-                "name" => name.map(|x| (x.to_owned(), "sub.name", true)),
+                "name" => name.map(|x| {
+                    let text = match role_icon(task, transcript_role.as_deref(), &cfg) {
+                        Some(icon) => format!("{icon} {x}"),
+                        None => x.to_owned(),
+                    };
+                    (text, "sub.name", true)
+                }),
                 "desc" if identity.is_some() => detail.map(|x| (x.to_owned(), "text.dim", false)),
                 "model" => task
                     .get("model")
@@ -417,6 +427,7 @@ pub fn render_subagent_value(raw: Value, cfg: Value) -> String {
                     .get("tokenCount")
                     .and_then(num_value)
                     .map(|x| (simple::tokens(x), "text.dim", false)),
+                "activity" => subagent_activity(task).map(|x| (x, "text.dim", false)),
                 _ => None,
             };
             if let Some((text, key, bold)) = rendered {
@@ -438,6 +449,48 @@ pub fn render_subagent_value(raw: Value, cfg: Value) -> String {
         output.push_str(&format!("{{\"id\":{id},\"content\":{content}}}\n"));
     }
     output
+}
+
+/// Glyph from `segments.name.roleIcons`, keyed by the task's own `agentType`
+/// when present, otherwise by the transcript-recorded role.
+fn role_icon<'a>(task: &Value, transcript_role: Option<&str>, cfg: &'a Value) -> Option<&'a str> {
+    let icons = cfg
+        .get("segments")?
+        .get("name")?
+        .get("roleIcons")?
+        .as_object()?;
+    let lookup = |key: &str| icons.get(key).and_then(Value::as_str);
+    match task.get("agentType").and_then(Value::as_str) {
+        Some(agent_type) => lookup(agent_type),
+        None => transcript_role.and_then(lookup),
+    }
+}
+
+/// Sparkline of the last 16 numeric `tokenSamples`, scaled from min to max.
+fn subagent_activity(task: &Value) -> Option<String> {
+    const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let samples = task
+        .get("tokenSamples")?
+        .as_array()?
+        .iter()
+        .filter_map(num_value)
+        .collect::<Vec<_>>();
+    let samples = &samples[samples.len().saturating_sub(16)..];
+    if samples.is_empty() {
+        return None;
+    }
+    let min = samples.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let range = max - min;
+    Some(
+        samples
+            .iter()
+            .map(|x| {
+                let level = if range > 0. { (x - min) / range * 7. } else { 0. };
+                BLOCKS[level.round() as usize]
+            })
+            .collect(),
+    )
 }
 
 fn num_value(v: &Value) -> Option<f64> {
