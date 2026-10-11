@@ -448,20 +448,26 @@ fn num_value(v: &Value) -> Option<f64> {
 }
 fn model_short(model: &str) -> String {
     let s = model.strip_prefix("claude-").unwrap_or(model);
-    s.split('-')
-        .map(|part| {
-            if part.chars().all(|c| c.is_ascii_digit()) {
-                part.to_owned()
-            } else {
-                let mut chars = part.chars();
-                chars
-                    .next()
-                    .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
-                    .unwrap_or_default()
+    let is_version = |part: &str| part.len() <= 2 && part.chars().all(|c| c.is_ascii_digit());
+    let mut out = String::new();
+    let mut prev_version = false;
+    for part in s.split('-') {
+        let version = is_version(part);
+        if !out.is_empty() {
+            out.push(if version && prev_version { '.' } else { ' ' });
+        }
+        if part.chars().all(|c| c.is_ascii_digit()) {
+            out.push_str(part);
+        } else {
+            let mut chars = part.chars();
+            if let Some(c) = chars.next() {
+                out.extend(c.to_uppercase());
+                out.push_str(chars.as_str());
             }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+        }
+        prev_version = version;
+    }
+    out
 }
 fn subagent_ctx(task: &Value, c: &RenderContext) -> Option<(String, &'static str, bool)> {
     let tokens = task.get("tokenCount").and_then(num_value)?;
