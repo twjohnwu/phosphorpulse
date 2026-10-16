@@ -46,16 +46,24 @@ impl Drop for TempDir {
     }
 }
 
+/// Serialises every test that mutates process-wide env vars: cargo runs tests in
+/// parallel threads, and one test's HOME / PPULSE_NOW_MS must not leak into another.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct EnvGuard {
     home: Option<OsString>,
     ppulse_config_dir: Option<OsString>,
+    // Declared last so it drops after `Drop::drop` has restored the environment.
+    _lock: std::sync::MutexGuard<'static, ()>,
 }
 
 impl EnvGuard {
     fn use_temp_home(home: &Path) -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let guard = Self {
             home: std::env::var_os("HOME"),
             ppulse_config_dir: std::env::var_os("PPULSE_CONFIG_DIR"),
+            _lock: lock,
         };
         // This test must never let preview resolution reach the caller's HOME.
         unsafe {
