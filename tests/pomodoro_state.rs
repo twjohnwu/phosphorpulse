@@ -301,8 +301,8 @@ fn test_future_last_notified_does_not_block_notification() {
     wait_for_counter_len(&counter, usize::from(NOTIFIES));
     assert_eq!(
         read_state(&config)["lastNotifiedAtMs"].as_i64(),
-        Some(if NOTIFIES { now } else { now + 2 * 3_600_000 }),
-        "future lastNotifiedAtMs must be healed/replaced by now when a notification fires"
+        if NOTIFIES { Some(now) } else { None },
+        "a future lastNotifiedAtMs is dropped, then replaced by now when a notification fires"
     );
 }
 
