@@ -1,35 +1,18 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::{self, Write},
-    path::{Path, PathBuf},
-    process,
-    time::SystemTime,
+    fs::{self, File, OpenOptions, TryLockError},
+    io,
+    path::Path,
 };
 
+/// Holds a kernel advisory lock for as long as the `File` lives; the kernel releases it on
+/// process exit or crash, so a dead refresher can never wedge the lock. `_file` is `None` when
+/// locking is unsupported and we failed open.
 pub struct RefreshLock {
-    path: PathBuf,
-    token: String,
+    _file: Option<File>,
 }
 
-const STALE_AFTER_SECS: u64 = 30;
-
-fn new_token() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{}-{}", process::id(), nanos)
-}
-
-fn create(path: &Path, token: &str) -> io::Result<()> {
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(token.as_bytes())
-}
-
-/// Age of the existing lock file, or `None` if it can't be determined (treated as fresh).
-fn lock_age(path: &Path) -> Option<std::time::Duration> {
-    let modified = fs::metadata(path).ok()?.modified().ok()?;
-    SystemTime::now().duration_since(modified).ok()
+fn open(path: &Path) -> io::Result<File> {
+    OpenOptions::new().write(true).create(true).truncate(false).open(path)
 }
 
 impl RefreshLock {
@@ -38,38 +21,23 @@ impl RefreshLock {
     }
 
     pub fn acquire_at(lock_path: &Path) -> Option<RefreshLock> {
-        let path = lock_path.to_path_buf();
-        let token = new_token();
-        match create(&path, &token) {
-            Ok(()) => Some(RefreshLock { path, token }),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                let age = lock_age(&path);
-                if age.is_none_or(|age| age.as_secs() <= STALE_AFTER_SECS) {
-                    return None;
-                }
-                let stale_path = path.with_extension(format!("lock.stale-{token}"));
-                if fs::rename(&path, &stale_path).is_err() {
-                    return None;
-                }
-                let _ = fs::remove_file(&stale_path);
-                create(&path, &token).ok()?;
-                Some(RefreshLock { path, token })
-            }
+        let file = match open(lock_path) {
+            Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 fs::create_dir_all(lock_path.parent()?).ok()?;
-                create(&path, &token).ok()?;
-                Some(RefreshLock { path, token })
+                open(lock_path).ok()?
             }
-            Err(_) => None,
+            Err(_) => return None,
+        };
+        match file.try_lock() {
+            Ok(()) => Some(RefreshLock { _file: Some(file) }),
+            Err(TryLockError::WouldBlock) => None,
+            // Filesystems without flock support: run unlocked, as the old create_new lock did.
+            Err(TryLockError::Error(_)) => Some(RefreshLock { _file: None }),
         }
     }
 
-    pub fn release(self) {
-        if fs::read_to_string(&self.path)
-            .map(|contents| contents == self.token)
-            .unwrap_or(false)
-        {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
+    /// Drops the handle only. The lock file is never deleted: removing it would let one
+    /// process lock the old inode while another creates and locks a new one.
+    pub fn release(self) {}
 }

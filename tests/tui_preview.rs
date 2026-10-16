@@ -506,3 +506,86 @@ fn test_s08_preview_cmd_static() {
         "preview leaves the real config directory byte-for-byte unchanged"
     );
 }
+
+/// S-18: the preview sample carries a warm prompt cache (`⧗ 5Nm`, also under a
+/// pinned `PPULSE_NOW_MS`) and the subagent sample carries `tokenSamples`.
+#[test]
+fn test_s18_preview_sample_shows_cache_and_activity() {
+    fn strip_ansi(input: &str) -> String {
+        let bytes = input.as_bytes();
+        let mut plain = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'[') {
+                index += 2;
+                while index < bytes.len() {
+                    let byte = bytes[index];
+                    index += 1;
+                    if (0x40..=0x7e).contains(&byte) {
+                        break;
+                    }
+                }
+            } else {
+                plain.push(bytes[index]);
+                index += 1;
+            }
+        }
+        String::from_utf8(plain).expect("stripping ANSI preserves UTF-8")
+    }
+
+    /// `⧗ 5<digit>m`, a pattern rather than an exact minute count.
+    fn has_cache_countdown(line: &str) -> bool {
+        let chars: Vec<char> = line.chars().collect();
+        chars.windows(5).any(|w| {
+            w[0] == '⧗' && w[1] == ' ' && w[2] == '5' && w[3].is_ascii_digit() && w[4] == 'm'
+        })
+    }
+
+    let temp = TempDir::new("s18-preview-cache");
+    let home = temp.path().join("home");
+    let config_dir = temp.path().join("config");
+    fs::create_dir_all(&home).expect("create temporary home");
+    fs::create_dir_all(&config_dir).expect("create temporary config directory");
+    let _environment = EnvGuard::use_temp_home(&home);
+    let old_now = std::env::var_os("PPULSE_NOW_MS");
+
+    let mut draft = serde_json::to_value(Config::defaults()).expect("serialize default config");
+    draft["rows"] = json!([{"layout": "fixed", "segments": ["model", "cache"]}]);
+
+    let render_first_line = || {
+        let rendered = phosphorpulse::render::render_value_preview_at_columns(
+            phosphorpulse::tui::preview::main_sample(),
+            draft.clone(),
+            config_dir.clone(),
+            120,
+        );
+        strip_ansi(&rendered).lines().next().unwrap_or_default().to_owned()
+    };
+
+    unsafe { std::env::remove_var("PPULSE_NOW_MS") };
+    let real_clock = render_first_line();
+    unsafe { std::env::set_var("PPULSE_NOW_MS", "1800000000000") };
+    let pinned_clock = render_first_line();
+    unsafe {
+        match old_now {
+            Some(value) => std::env::set_var("PPULSE_NOW_MS", value),
+            None => std::env::remove_var("PPULSE_NOW_MS"),
+        }
+    }
+    assert!(has_cache_countdown(&real_clock), "real clock: {real_clock:?}");
+    assert!(has_cache_countdown(&pinned_clock), "pinned clock: {pinned_clock:?}");
+
+    let sub = phosphorpulse::tui::preview::subagent_sample();
+    assert!(
+        sub["tasks"][0].get("tokenSamples").is_some(),
+        "subagent sample carries tokenSamples"
+    );
+    let mut sub_draft = serde_json::to_value(Config::defaults()).expect("serialize default config");
+    sub_draft["subagent"] = json!({"segments": ["name", "activity"]});
+    let rendered = phosphorpulse::render::render_subagent_value(sub, sub_draft);
+    let content = rendered.lines().next().unwrap_or_default();
+    assert!(
+        content.chars().any(|c| ('▁'..='█').contains(&c)),
+        "activity sparkline renders: {content:?}"
+    );
+}

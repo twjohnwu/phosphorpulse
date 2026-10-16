@@ -3,10 +3,17 @@
 use super::{pomodoro::valid_session_id, simple::{tokens, Segment}};
 use crate::{atomic_write, protocol::{PromptCache, RenderContext}};
 use serde_json::{json, Map, Value};
-use std::{fs, path::{Path, PathBuf}};
+use std::{fs, path::{Path, PathBuf}, time::{Duration, SystemTime}};
 
 const SCHEMA: i64 = 1;
 const MINUTE_FORMAT_FROM_S: i64 = 600;
+/// A countdown more than a day in the future is a garbage `expires_at`, not data.
+const MAX_REMAINING_S: i64 = 86_400;
+/// An expiry more than 400 days in the past is garbage too; shorter lapses are real cold caches.
+const MIN_REMAINING_S: i64 = -400 * 86_400;
+const STATE_MAX_AGE: Duration = Duration::from_secs(7 * 86_400);
+const STATE_MAX_FUTURE: Duration = Duration::from_secs(86_400);
+const SWEEP_SCAN_LIMIT: usize = 500;
 
 fn ttl_seconds(ttl: &str) -> Option<i64> {
     let unit = ttl.chars().last()?;
@@ -21,14 +28,19 @@ fn ttl_seconds(ttl: &str) -> Option<i64> {
 }
 
 fn remaining_s(cache: &PromptCache, now_ms: i64) -> i64 {
-    cache.expires_at - now_ms.div_euclid(1000)
+    // Saturating: stdin and state files can hold any i64.
+    cache.expires_at.saturating_sub(now_ms.div_euclid(1000))
+}
+
+fn remaining_in_bounds(remaining: i64) -> bool {
+    (MIN_REMAINING_S..=MAX_REMAINING_S).contains(&remaining)
 }
 
 /// Warn inside the last 10% of the TTL, and for any TTL longer than ten
 /// minutes also once the countdown switches to `m:ss`. Unparseable TTL stays ok.
 fn countdown_color(ttl: Option<&str>, remaining: i64) -> &'static str {
     match ttl.and_then(ttl_seconds) {
-        Some(ttl) if remaining * 10 <= ttl => "warn",
+        Some(ttl) if remaining.saturating_mul(10) <= ttl => "warn",
         Some(ttl) if ttl > MINUTE_FORMAT_FROM_S && remaining < MINUTE_FORMAT_FROM_S => "warn",
         _ => "ok",
     }
@@ -37,6 +49,9 @@ fn countdown_color(ttl: Option<&str>, remaining: i64) -> &'static str {
 pub fn segment(c: &RenderContext, now_ms: i64) -> Option<Segment> {
     let cache = c.prompt_cache.as_ref()?;
     let remaining = remaining_s(cache, now_ms);
+    if !remaining_in_bounds(remaining) {
+        return None;
+    }
     if !cache.warm.unwrap_or(true) || remaining <= 0 {
         let text = match cache.recache_tokens_if_cold {
             Some(n) => format!("⧗ cold {}", tokens(n as f64)),
@@ -67,6 +82,33 @@ fn read_state(path: &Path) -> Option<Map<String, Value>> {
     }
 }
 
+/// Best-effort: drop state files nobody will read again (old, or future-dated by
+/// a bad clock). Runs only when a new session file is created, so ordinary
+/// renders never touch the directory; the scan cap bounds even that.
+/// Compares file mtimes against the real wall clock, never `PPULSE_NOW_MS`: a fake
+/// far-future clock in a probe would otherwise delete every live session file.
+fn sweep_state_dir(cache_dir: &Path) {
+    let now = SystemTime::now();
+    atomic_write::clear_stale_temps(cache_dir, now);
+    let Ok(entries) = fs::read_dir(cache_dir) else {
+        return;
+    };
+    for entry in entries.flatten().take(SWEEP_SCAN_LIMIT) {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        let too_old = now.duration_since(mtime).is_ok_and(|age| age > STATE_MAX_AGE);
+        let too_new = mtime.duration_since(now).is_ok_and(|ahead| ahead > STATE_MAX_FUTURE);
+        if too_old || too_new {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 /// Best-effort: record the latest `prompt_cache` for external readers. The file
 /// is only rewritten when a field other than `updated_at` changed.
 pub fn persist(c: &RenderContext, config_dir: &Path, now_ms: i64) {
@@ -89,6 +131,11 @@ pub fn persist(c: &RenderContext, config_dir: &Path, now_ms: i64) {
     });
     if unchanged {
         return;
+    }
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            sweep_state_dir(dir);
+        }
     }
     doc.insert("updated_at".into(), json!(now_ms));
     if let Ok(bytes) = serde_json::to_vec(&Value::Object(doc)) {
@@ -113,7 +160,11 @@ pub fn state_command(args: &[String], config_dir: &Path, now_ms: i64) -> i32 {
         return 1;
     };
     if let Some(expires_at) = doc.get("expires_at").and_then(Value::as_i64) {
-        doc.insert("remaining_s".into(), json!(expires_at - now_ms.div_euclid(1000)));
+        let remaining = expires_at.saturating_sub(now_ms.div_euclid(1000));
+        // Out of bounds is no data; leave remaining_s out.
+        if remaining_in_bounds(remaining) {
+            doc.insert("remaining_s".into(), json!(remaining));
+        }
     }
     println!("{}", Value::Object(doc));
     0

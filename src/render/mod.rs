@@ -71,7 +71,7 @@ fn palette_color<'a>(value: &'a str, t: &'a Theme) -> &'a str {
 // Gauge segments: a configured fg replaces only the normal "ok" color, so
 // warn/hot/dim thresholds stay visible.
 fn is_gauge(id: &str) -> bool {
-    matches!(id, "limit5h" | "limit7d" | "limitModel" | "ctx")
+    matches!(id, "limit5h" | "limit7d" | "limitModel" | "ctx" | "cache")
 }
 fn wrap(id: &str, s: Segment, row: Option<&Value>, cfg: &Value, t: &Theme, d: &str) -> String {
     let fg = if id.starts_with("cmd:") && s.fg == Some("text.dim") {
@@ -556,10 +556,8 @@ fn subagent_ctx(task: &Value, c: &RenderContext) -> Option<(String, &'static str
 }
 fn subagent_elapsed(task: &Value) -> Option<(String, &'static str, bool)> {
     let start = task.get("startTime").and_then(num_value)? as i64;
-    let diff = crate::clock::now_ms() - start;
-    if diff < 0 {
-        return None;
-    }
+    // checked_sub: `startTime` comes from task JSON and may be extreme.
+    let diff = crate::clock::now_ms().checked_sub(start).filter(|d| *d >= 0)?;
     let seconds = diff / 1000;
     let h = seconds / 3600;
     let m = (seconds % 3600) / 60;

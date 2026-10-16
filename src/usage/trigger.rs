@@ -6,8 +6,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-// Longest legitimate schedule is the 3600s 429 backoff clamp in src/usage/mod.rs:98.
-const MAX_SCHEDULE_AHEAD_MS: i64 = 3_600_000;
+// Longest legitimate schedule is the 3600s 429 backoff clamp in src/usage/mod.rs:98;
+// the slack tolerates a render `now` slightly before the refresher's write and small clock rewinds.
+const BACKOFF_CLAMP_MS: i64 = 3_600_000;
+const SLACK_MS: i64 = 60_000;
+const MAX_SCHEDULE_AHEAD_MS: i64 = BACKOFF_CLAMP_MS + SLACK_MS;
 
 pub fn resolve_for_render(config_dir: &Path, now: i64) -> Option<UsageCache> {
     let path = cache::cache_path(config_dir);
@@ -25,6 +28,7 @@ pub fn resolve_for_render(config_dir: &Path, now: i64) -> Option<UsageCache> {
                 .as_ref()
                 .map(|value| value.limits.clone())
                 .unwrap_or_default(),
+            last_error: None,
         };
         if cache::write_cache(&path, &claim).is_err() {
             return cache;
@@ -41,9 +45,10 @@ pub fn resolve_for_render(config_dir: &Path, now: i64) -> Option<UsageCache> {
 
     // Parsable, unexpired claim window: fetched_at absent means it's someone
     // else's in-flight claim — wait on it rather than shortcut-returning.
+    // A recorded failure (lastError) also ends the wait: nothing is in flight.
     if cache
         .as_ref()
-        .is_some_and(|value| value.fetched_at.is_none())
+        .is_some_and(|value| value.fetched_at.is_none() && value.last_error.is_none())
     {
         return wait_for_cache(&path, Duration::from_millis(800), None);
     }
@@ -69,7 +74,7 @@ fn wait_for_cache(
     let deadline = Instant::now() + budget;
     loop {
         if let Some(value) = cache::read_cache(path) {
-            if value.fetched_at.is_some() {
+            if value.fetched_at.is_some() || value.last_error.is_some() {
                 return Some(value);
             }
         }

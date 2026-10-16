@@ -391,3 +391,25 @@ fn test_auto_source_future_local_falls_back_to_api() {
     assert_eq!(cache["fetchedAt"], json!(NOW - 600_000));
     assert_eq!(cache["limits"][0]["displayName"], json!("OldModel"));
 }
+
+/// REQ (batch 4 #16b): `usage.source: "local"` treats a `fetchedAtMs` in the
+/// future as invalid too (same as Auto) — keep the old cache, retry in 30s.
+#[test]
+fn test_local_source_future_fetched_at_keeps_old_cache() {
+    let case = CaseDir::new("local-future");
+    case.write_settings(Some("local"));
+    case.write_old_cache(NOW - 600_000, NOW - 1);
+    case.write_claude_json(claude_json(
+        ACTIVE_UUID,
+        ACTIVE_UUID,
+        NOW + 2 * 3_600_000, // two hours in the future
+        utilization_with_one_skipped_limit(),
+    ));
+
+    let output = case.run();
+    assert_eq!(output.status.code(), Some(4), "stderr: {:?}", output.stderr);
+    let cache = case.cache();
+    assert_eq!(cache["fetchedAt"], json!(NOW - 600_000));
+    assert_eq!(cache["nextFetchAt"], json!(NOW + 30_000));
+    assert_eq!(cache["limits"][0]["displayName"], json!("OldModel"));
+}

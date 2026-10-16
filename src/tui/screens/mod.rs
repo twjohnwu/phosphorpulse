@@ -11,8 +11,8 @@ mod wizard;
 
 pub use codex_settings::CodexSettingsScreen;
 pub use editor::{
-    ColorsThemeScreen, RowsSegmentsScreen, SaveExitScreen, SettingsInstallScreen,
-    SubagentLineScreen, TemplatesScreen,
+    colors_separators, ColorsThemeScreen, RowsSegmentsScreen, SaveExitScreen,
+    SettingsInstallScreen, SubagentLineScreen, TemplatesScreen,
 };
 pub use error::ErrorScreen;
 pub use main_menu::MainMenuScreen;

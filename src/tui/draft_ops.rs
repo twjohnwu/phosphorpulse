@@ -266,7 +266,7 @@ fn effective_fg(draft: &Config, segment: &str) -> String {
         "model" | "dir" | "pomodoro" | "pomodoro.work" => "#00CF41",
         "effort" => "#008F11",
         "git" | "git.ok" | "ctx" | "ctx.ok" | "pomodoro.break" => "#00CDCD",
-        "limit5h" | "limit7d" | "limitModel" | "ok" => "#00FF41",
+        "limit5h" | "limit7d" | "limitModel" | "cache" | "ok" => "#00FF41",
         "node" | "python" => "#00E5FF",
         "version" => "#969696",
         "cost" | "burn" => "#008F11",

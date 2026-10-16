@@ -53,3 +53,12 @@ tests/pomodoro_gate_settings.rs
 src/segments/mod.rs
 src/usage/trigger.rs
 tests/usage_refresh.rs
+src/segments/cache.rs
+src/segments/lookup_cache.rs
+src/tui/screens/mod.rs
+src/usage/mod.rs
+tests/cache_state.rs
+tests/lookup_cache.rs
+tests/usage_cache.rs
+tests/usage_local_source.rs
+tests/extreme_timestamps.rs

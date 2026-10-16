@@ -115,6 +115,41 @@ fn write_lock(config_dir: &Path, key: &str, content: &str) {
     fs::write(&path, content).expect("seed lock fixture");
 }
 
+/// Opens (creating) the lock file and takes the kernel advisory exclusive lock, like a live
+/// refresher would. The lock is released when the returned `File` is dropped.
+fn hold_lock(config_dir: &Path, key: &str) -> fs::File {
+    let path = cache::lock_path(config_dir, key);
+    fs::create_dir_all(path.parent().expect("lock path has a parent"))
+        .expect("create commands directory");
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .expect("open lock fixture");
+    file.lock().expect("hold exclusive lock");
+    file
+}
+
+/// A plain file nobody holds (what an old version leaves behind), with the given mtime.
+fn write_plain_lock(config_dir: &Path, key: &str, mtime: SystemTime) {
+    write_lock(config_dir, key, "other");
+    fs::File::options()
+        .write(true)
+        .open(cache::lock_path(config_dir, key))
+        .expect("open plain lock")
+        .set_modified(mtime)
+        .expect("set plain lock mtime");
+}
+
+/// True when the lock file is absent or nobody holds it (`try_lock` succeeds).
+fn lock_not_held(config_dir: &Path, key: &str) -> bool {
+    match fs::File::open(cache::lock_path(config_dir, key)) {
+        Ok(file) => file.try_lock().is_ok(),
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 fn read_cache_bytes(config_dir: &Path, key: &str) -> Vec<u8> {
     fs::read(cache::cache_path(config_dir, key)).expect("read cache fixture bytes")
 }
@@ -181,8 +216,8 @@ fn assert_empty_stdio(result: &RunResult, label: &str) {
 
 fn assert_lock_released_and_not_reclaimed(config_dir: &Path, key: &str, label: &str) {
     assert!(
-        !cache::lock_path(config_dir, key).exists(),
-        "S-05 case {label}: lock file must not exist after cmd-refresh exits"
+        lock_not_held(config_dir, key),
+        "S-05 case {label}: lock must not be held after cmd-refresh exits"
     );
     let cache = read_cache_json(config_dir, key);
     assert_ne!(
@@ -369,7 +404,8 @@ fn test_s05_refresh_subcommand() {
         );
     }
 
-    // (5) lock already held: exit 5, cache bytes unchanged, lock unchanged.
+    // (5) lock already held (kernel lock): exit 5, cache bytes unchanged; once the holder
+    // lets go, the refresher runs (exit != 5).
     {
         let label = "5";
         let d = TempDir::new(&format!("d{label}"));
@@ -378,7 +414,7 @@ fn test_s05_refresh_subcommand() {
         write_settings(d.path(), command, None);
         let key = cmd::cache_key("k8s", Some(&p.as_str()));
         seed_claim(d.path(), &key, command);
-        write_lock(d.path(), &key, "other");
+        let holder = hold_lock(d.path(), &key);
         let before = read_cache_bytes(d.path(), &key);
 
         let result = run_cmd_refresh(d.path(), "k8s", &p.as_str(), stdin_json(&p.as_str()));
@@ -390,10 +426,13 @@ fn test_s05_refresh_subcommand() {
             before,
             "S-05 case {label}: cache bytes must be unchanged"
         );
-        assert_eq!(
-            fs::read_to_string(cache::lock_path(d.path(), &key)).expect("read lock file"),
-            "other",
-            "S-05 case {label}: lock file content must be unchanged"
+
+        drop(holder);
+        let result = run_cmd_refresh(d.path(), "k8s", &p.as_str(), stdin_json(&p.as_str()));
+        assert_ne!(
+            result.output.status.code(),
+            Some(5),
+            "S-05 case {label}: refresher must run once the lock is released"
         );
     }
 
@@ -1033,7 +1072,7 @@ fn test_s04_render_trigger_and_claim() {
                 last_error: None,
             },
         );
-        write_lock(d.path(), &key, "other");
+        let holder = hold_lock(d.path(), &key);
 
         let result = run_render(d.path(), &stdin_json(&p.as_str()));
 
@@ -1069,10 +1108,132 @@ fn test_s04_render_trigger_and_claim() {
             bytes_right_after_render,
             "S-04 case {label}: foreign lock must have blocked the reclaim child"
         );
+        drop(holder);
+    }
+}
+
+/// Far-future `nextFetchAt` (clock jump / corrupted file) must not freeze refresh; the bound
+/// is `max(ttlSec*1000, FAILURE_BACKOFF_MS, CLAIM_WINDOW_MS) + 60s slack`.
+#[test]
+fn test_far_future_next_fetch_triggers_cmd_refresh() {
+    // The child blocks long enough that it cannot rewrite the cache before the assertion.
+    const SLOW: &str = "cat > /dev/null; sleep 3; printf x";
+
+    // (A) usable cache, nextFetchAt 2h ahead -> rewritten as a claim.
+    {
+        let label = "A";
+        let d = TempDir::new("fa");
+        let p = TempDir::new("fap");
+        write_render_settings(d.path(), SLOW, 5, true);
+        let key = cmd::cache_key("k8s", Some(&p.as_str()));
+        seed_cache_state(
+            d.path(),
+            &key,
+            &CommandCache {
+                fetched_at: Some(NOW - 1_000),
+                next_fetch_at: NOW + 7_200_000,
+                command: SLOW.to_owned(),
+                output: Some("cached".into()),
+                last_error: None,
+            },
+        );
+
+        let _ = run_render(d.path(), &stdin_json(&p.as_str()));
+
         assert_eq!(
-            fs::read_to_string(cache::lock_path(d.path(), &key)).expect("read lock file"),
-            "other",
-            "S-04 case {label}: foreign lock content must be unchanged"
+            read_cache_json(d.path(), &key)["nextFetchAt"],
+            json!(NOW + 15_000),
+            "far-future case {label}: cache must be rewritten as a claim"
+        );
+    }
+
+    // (B) someone else's claim (fetchedAt null) with nextFetchAt 2h ahead -> re-claimed.
+    {
+        let label = "B";
+        let d = TempDir::new("fb");
+        let p = TempDir::new("fbp");
+        write_render_settings(d.path(), SLOW, 5, true);
+        let key = cmd::cache_key("k8s", Some(&p.as_str()));
+        seed_cache_state(
+            d.path(),
+            &key,
+            &CommandCache {
+                fetched_at: None,
+                next_fetch_at: NOW + 7_200_000,
+                command: SLOW.to_owned(),
+                output: None,
+                last_error: None,
+            },
+        );
+
+        let _ = run_render(d.path(), &stdin_json(&p.as_str()));
+
+        assert_eq!(
+            read_cache_json(d.path(), &key)["nextFetchAt"],
+            json!(NOW + 15_000),
+            "far-future case {label}: far-future claim must be re-claimed"
+        );
+    }
+
+    // (C) usable cache, nextFetchAt = ttl (5s) + 60s slack ahead -> still legitimate, untouched.
+    {
+        let label = "C";
+        let d = TempDir::new("fc");
+        let p = TempDir::new("fcp");
+        write_render_settings(d.path(), SLOW, 5, true);
+        let key = cmd::cache_key("k8s", Some(&p.as_str()));
+        seed_cache_state(
+            d.path(),
+            &key,
+            &CommandCache {
+                fetched_at: Some(NOW - 1_000),
+                next_fetch_at: NOW + 5_000 + 60_000,
+                command: SLOW.to_owned(),
+                output: Some("cached".into()),
+                last_error: None,
+            },
+        );
+        let before = read_cache_bytes(d.path(), &key);
+
+        let _ = run_render(d.path(), &stdin_json(&p.as_str()));
+        thread::sleep(Duration::from_millis(300));
+
+        assert_eq!(
+            read_cache_bytes(d.path(), &key),
+            before,
+            "far-future case {label}: cache within ttl + slack must not be rewritten"
+        );
+    }
+}
+
+/// Kernel-lock protocol: a plain lock file nobody holds (left by an old version, any mtime,
+/// including the future) must not block the refresher.
+#[test]
+fn test_s05_unheld_plain_lock_file_is_acquired() {
+    let one_day = Duration::from_secs(86_400);
+    let cases = [
+        ("future-mtime", SystemTime::now() + one_day),
+        ("fresh-mtime", SystemTime::now()),
+    ];
+    for (label, mtime) in cases {
+        let d = TempDir::new("ul");
+        let p = TempDir::new("ulp");
+        let command = "true";
+        write_settings(d.path(), command, None);
+        let key = cmd::cache_key("k8s", Some(&p.as_str()));
+        seed_claim(d.path(), &key, command);
+        write_plain_lock(d.path(), &key, mtime);
+
+        let result = run_cmd_refresh(d.path(), "k8s", &p.as_str(), stdin_json(&p.as_str()));
+
+        assert_ne!(
+            result.output.status.code(),
+            Some(5),
+            "unheld plain lock ({label}) must be acquired, not treated as held"
+        );
+        assert!(
+            lock_not_held(d.path(), &key),
+            "unheld plain lock ({label}): lock must not be held after exit"
         );
     }
 }

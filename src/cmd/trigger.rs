@@ -8,8 +8,12 @@ use std::{
 use crate::config::CommandSpec;
 
 use super::{
-    CLAIM_WINDOW_MS, CommandCache, STDIN_FORWARD_MAX_BYTES, STDIN_SYNC_MAX_BYTES, cache, cache_key,
+    CLAIM_WINDOW_MS, CommandCache, FAILURE_BACKOFF_MS, STDIN_FORWARD_MAX_BYTES,
+    STDIN_SYNC_MAX_BYTES, cache, cache_key, seconds_to_millis,
 };
+
+// Tolerates a render `now` slightly before the refresher's write, and small clock rewinds.
+const SLACK_MS: i64 = 60_000;
 
 pub fn resolve_for_render(
     config_dir: &Path,
@@ -27,13 +31,22 @@ pub fn resolve_for_render(
     let usable = cached.as_ref().is_some_and(|cache| {
         !mismatch && cache.fetched_at.is_some()
     });
+    // Longest schedule a refresher legitimately writes; anything further out (clock jump,
+    // corrupt file) would freeze refresh until the clock catches up.
+    let max_ahead = seconds_to_millis(spec.ttl_sec)
+        .max(FAILURE_BACKOFF_MS)
+        .max(CLAIM_WINDOW_MS)
+        .saturating_add(SLACK_MS);
+    let too_far = |cache: &CommandCache| cache.next_fetch_at.saturating_sub(now) > max_ahead;
     let others_claim = cached.as_ref().is_some_and(|cache| {
-        !mismatch && cache.fetched_at.is_none() && now < cache.next_fetch_at
+        !mismatch && cache.fetched_at.is_none() && now < cache.next_fetch_at && !too_far(cache)
     });
     let needs_refresh = !others_claim
         && (cached.is_none()
             || mismatch
-            || cached.as_ref().is_some_and(|cache| now >= cache.next_fetch_at));
+            || cached
+                .as_ref()
+                .is_some_and(|cache| now >= cache.next_fetch_at || too_far(cache)));
 
     if needs_refresh {
         let claim = build_claim(cached.as_ref(), usable, spec, now);

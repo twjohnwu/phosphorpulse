@@ -249,7 +249,7 @@ fn test_s03_gate_decision_table() {
 #[test]
 fn test_s04_fail_open() {
     let pad = "x".repeat(70_000);
-    let cases = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
+    let cases = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
     let mut failures: Vec<String> = Vec::new();
     for case in cases {
         let dir = TempDir::new("s04");
@@ -293,10 +293,6 @@ fn test_s04_fail_open() {
                 env.push(("PPULSE_POMODORO_BLOCK_DURING_REST", "true".to_string()));
                 write_files(dir.path(), Some(&config), Some(&shared));
             }
-            "k" => {
-                shared = gate_state(n, "shortBreak", 1.0, 1.0, -60.0);
-                write_files(dir.path(), Some(&config), Some(&shared));
-            }
             _ => {
                 shared = gate_state(n, "work", 1.0, 24.0, 1.0);
                 env.push(("PPULSE_NOW_MS", format!("{}", n + min(2.0))));
@@ -315,4 +311,80 @@ fn test_s04_fail_open() {
         }
     }
     assert!(failures.is_empty(), "failing cases:\n{}", failures.join("\n"));
+}
+
+fn run_render(dir: &Path) -> bool {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_phosphorpulse"));
+    cmd.arg("render").env_clear();
+    cmd.env("PATH", std::env::var_os("PATH").unwrap_or_default());
+    cmd.env("HOME", dir);
+    cmd.env("PPULSE_CONFIG_DIR", dir);
+    cmd.env("COLUMNS", "120");
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"session_id":"gate-heal-session"}"#)
+        .unwrap();
+    child.wait_with_output().unwrap().status.success()
+}
+
+fn gate_config_with_pomodoro_row() -> String {
+    let mut config = default_config();
+    config.0.insert("pomodoro".into(), json!({"blockDuringRest": true}));
+    config.0.insert(
+        "rows".into(),
+        json!([{ "layout": "auto", "segments": ["pomodoro"] }]),
+    );
+    serde_json::to_string(&config.0).unwrap()
+}
+
+/// Batch 2 #6a: a future phaseStartMs stays allowed (advance would restart a
+/// full rest from now, so the gate must not hand it to advance).
+#[test]
+fn test_gate_future_phase_start_allows() {
+    let dir = TempDir::new("future-start");
+    let n = now_ms();
+    let shared = gate_state(n, "shortBreak", 1.0, -60.0, 2.0);
+    write_files(dir.path(), Some(&config_json(Some(true), None, None)), Some(&shared));
+    let run = run_gate(dir.path(), Some("cli"), &[]);
+    assert_eq!(run.code, Some(0), "future phaseStartMs must be allowed, stderr={:?}", run.stderr);
+    assert_eq!(run.stderr, "");
+}
+
+/// Batch 2 #6b: a future lastActivityMs is clamped to now, so a rest phase in
+/// progress still blocks.
+#[test]
+fn test_gate_future_last_activity_blocks_rest() {
+    let dir = TempDir::new("future-activity");
+    let n = now_ms();
+    let shared = gate_state(n, "shortBreak", 1.0, 1.0, -60.0);
+    write_files(dir.path(), Some(&config_json(Some(true), None, None)), Some(&shared));
+    let run = run_gate(dir.path(), Some("cli"), &[]);
+    assert_eq!(run.code, Some(2), "future lastActivityMs must not open the gate, stderr={:?}", run.stderr);
+    assert!(run.stderr.contains("on a break"), "stderr={:?}", run.stderr);
+}
+
+/// Batch 2 #6c: one render heals a future phaseStartMs (restarts the phase
+/// from now); the gate then follows the healed state and blocks the rest.
+#[test]
+fn test_gate_follows_state_healed_by_render() {
+    let dir = TempDir::new("heal");
+    let n = now_ms();
+    let shared = gate_state(n, "shortBreak", 1.0, -60.0, 2.0);
+    write_files(dir.path(), Some(&gate_config_with_pomodoro_row()), Some(&shared));
+    let before = run_gate(dir.path(), Some("cli"), &[]);
+    assert_eq!(before.code, Some(0), "future phaseStartMs allowed before the render, stderr={:?}", before.stderr);
+
+    assert!(run_render(dir.path()), "render must succeed");
+    let healed: Value = serde_json::from_slice(&fs::read(dir.path().join("pomodoro/shared.json")).unwrap()).unwrap();
+    assert!(
+        healed["phaseStartMs"].as_f64().unwrap() <= now_ms(),
+        "render must heal the future phaseStartMs: {healed}"
+    );
+    let after = run_gate(dir.path(), Some("cli"), &[]);
+    assert_eq!(after.code, Some(2), "gate must follow the healed rest phase, stderr={:?}", after.stderr);
+    assert!(after.stderr.contains("on a break"), "stderr={:?}", after.stderr);
 }

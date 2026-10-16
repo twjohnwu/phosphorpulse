@@ -58,7 +58,7 @@ pub(crate) fn reset(v: Option<&Value>) -> Option<i64> {
  match value {
   Value::Number(_) => num(Some(value)).map(|x| (x * 1000.0) as i64),
   // Claude Code has emitted both epoch seconds and ISO-8601 strings.
-  Value::String(s) if !s.is_empty() => s.parse::<i64>().ok().map(|x| x * 1000).or_else(|| parse_iso_millis(s)),
+  Value::String(s) if !s.is_empty() => s.parse::<i64>().ok().and_then(|x| x.checked_mul(1000)).or_else(|| parse_iso_millis(s)),
   _ => None,
  }
 }
@@ -78,7 +78,8 @@ pub(crate) fn clean_text(s: Option<&str>) -> Option<String> {
 pub(crate) fn parse_iso_millis(s: &str) -> Option<i64> {
  let (date, time) = s.split_once('T')?;
  let mut ds=date.split('-').map(str::parse::<i64>); let (y,mo,d)=(ds.next()?.ok()?,ds.next()?.ok()?,ds.next()?.ok()?);
- if !(1..=12).contains(&mo) { return None; }
+ // Bound the year before the leap-year loop below: an extreme year would otherwise spin for billions of iterations.
+ if !(1..=12).contains(&mo) || !(1970..=9999).contains(&y) { return None; }
  let zone_at=time.find(|c| c == 'Z' || c == '+' || c == '-').unwrap_or(time.len());
  let clock=&time[..zone_at]; let zone=&time[zone_at..]; let mut ts=clock.split(':');
  let h=ts.next()?.parse::<i64>().ok()?; let mi=ts.next()?.parse::<i64>().ok()?;
@@ -88,7 +89,15 @@ pub(crate) fn parse_iso_millis(s: &str) -> Option<i64> {
  let leap= y%4==0 && (y%100!=0 || y%400==0); let month_days=[31,28 + leap as i64,31,30,31,30,31,31,30,31,30,31];
  if d < 1 || d > month_days[(mo - 1) as usize] || !(0..=23).contains(&h) || !(0..=59).contains(&mi) || !(0..=59).contains(&se) { return None; }
  let days=year_days+month_days[..(mo-1) as usize].iter().sum::<i64>()+d-1;
- let offset=if zone.is_empty() || zone=="Z" {0} else { let sign=if zone.starts_with('+') {1} else {-1}; let z=&zone[1..]; let (zh,zm)=z.split_once(':').unwrap_or((z,"0")); sign*(zh.parse::<i64>().ok()?*3600+zm.parse::<i64>().ok()?*60) };
+ // Only `Z` or `±HH:MM`: `+0530` must not be read as 530 hours, and no byte slicing so non-ASCII cannot panic.
+ let offset=if zone.is_empty() || zone=="Z" {0} else {
+  let sign=match zone.chars().next()? { '+' => 1, '-' => -1, _ => return None };
+  let (zh,zm)=zone.get(1..)?.split_once(':')?;
+  if ![zh,zm].iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) { return None; }
+  let (zh,zm)=(zh.parse::<i64>().ok()?,zm.parse::<i64>().ok()?);
+  if !(0..=14).contains(&zh) || !(0..=59).contains(&zm) { return None; }
+  sign*(zh*3600+zm*60)
+ };
  Some((days*86400+h*3600+mi*60+se-offset)*1000+ms)
 }
 impl RenderContext {

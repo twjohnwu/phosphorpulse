@@ -23,6 +23,12 @@ pub struct UsageCache {
     pub fetched_at: Option<i64>,
     pub next_fetch_at: i64,
     pub limits: Vec<UsageLimit>,
+    /// Fixed label for the most recent failure ("auth", "rate_limited", "other",
+    /// "local_unavailable") — never a response body or token. It lets a render tell
+    /// "first fetch failed" from "claim in flight" when `fetched_at` is still empty.
+    /// `None` on success and on claims; absent for cache files written before this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,6 +92,7 @@ pub fn schedule(
             fetched_at: Some(now),
             next_fetch_at: now.saturating_add(seconds_to_millis(refresh_sec)),
             limits,
+            last_error: None,
         },
         FetchOutcome::RateLimited(retry_after) => {
             // A `retry-after` below 60s (including 0, which the undocumented
@@ -96,18 +103,20 @@ pub fn schedule(
             kept_cache(
                 old,
                 now.saturating_add(seconds_to_millis(retry_after_sec.clamp(60, 3600))),
+                "rate_limited",
             )
         }
-        FetchOutcome::AuthFailed => kept_cache(old, now.saturating_add(300_000)),
-        FetchOutcome::OtherFailure => kept_cache(old, now.saturating_add(30_000)),
+        FetchOutcome::AuthFailed => kept_cache(old, now.saturating_add(300_000), "auth"),
+        FetchOutcome::OtherFailure => kept_cache(old, now.saturating_add(30_000), "other"),
     }
 }
 
-fn kept_cache(old: Option<&UsageCache>, next_fetch_at: i64) -> UsageCache {
+fn kept_cache(old: Option<&UsageCache>, next_fetch_at: i64, error: &str) -> UsageCache {
     UsageCache {
         fetched_at: old.and_then(|cache| cache.fetched_at),
         next_fetch_at,
         limits: old.map(|cache| cache.limits.clone()).unwrap_or_default(),
+        last_error: Some(error.to_string()),
     }
 }
 
@@ -165,6 +174,7 @@ fn success_cache(fetched_at: i64, now: i64, refresh_sec: u64, limits: Vec<UsageL
         fetched_at: Some(fetched_at),
         next_fetch_at: now.saturating_add(seconds_to_millis(refresh_sec)),
         limits,
+        last_error: None,
     }
 }
 
@@ -178,6 +188,7 @@ pub fn preview_cache(now: i64) -> UsageCache {
             resets_at: Some(now.saturating_add(495_420_000)),
             is_active: true,
         }],
+        last_error: None,
     }
 }
 
@@ -239,10 +250,15 @@ fn api_result(now: i64, refresh_sec: u64, old: Option<&UsageCache>) -> (UsageCac
 /// in 30s, the same as `OtherFailure`.
 fn local_result(now: i64, refresh_sec: u64, old: Option<&UsageCache>) -> (UsageCache, i32) {
     match local::read_local_usage() {
-        Some(usage) => (
+        // Same bogus-future guard as Auto: a future fetchedAtMs must not pass as fresh.
+        Some(usage) if usage.fetched_at_ms <= now => (
             success_cache(usage.fetched_at_ms, now, refresh_sec, usage.limits),
             0,
         ),
-        None => (schedule(FetchOutcome::OtherFailure, old, now, refresh_sec), 4),
+        _ => {
+            let mut cache = schedule(FetchOutcome::OtherFailure, old, now, refresh_sec);
+            cache.last_error = Some("local_unavailable".to_string());
+            (cache, 4)
+        }
     }
 }

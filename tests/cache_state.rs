@@ -374,3 +374,115 @@ fn test_cache_state_subcommand() {
         assert_eq!(missing, json!({ "schema": 1, "error": "not-found" }), "{id}");
     }
 }
+
+/// batch 3 #11: a stored extreme `expires_at` must not panic `cache-state`.
+#[test]
+fn test_cache_state_extreme_expiry_no_panic() {
+    let env = Env::new(&["cache"]);
+    let cache_dir = env.config().join("cache");
+    fs::create_dir_all(&cache_dir).expect("create cache directory");
+    for (label, expires_at) in [("i64::MIN", i64::MIN), ("i64::MAX", i64::MAX), ("1e18", 1_000_000_000_000_000_000)] {
+        let session = format!("extreme-{}", label.replace([':', '^'], "-"));
+        let doc = json!({
+            "schema": 1, "session_id": session, "warm": true, "ttl": "1h",
+            "expires_at": expires_at, "recache_tokens_if_cold": null, "updated_at": NOW_MS,
+        });
+        fs::write(env.state_file(&session), doc.to_string()).expect("write extreme state file");
+        let (code, found) = env.cache_state(NOW_MS, &session);
+        assert_eq!(code, Some(0), "{label}: {found}");
+        assert_eq!(found["session_id"], session, "{label}: {found}");
+        // More than a day away (either direction) is no data: no remaining_s,
+        // or at minimum nothing absurd.
+        if let Some(remaining) = found.get("remaining_s").and_then(Value::as_i64) {
+            assert!(remaining.abs() <= 86_400 * 2, "{label}: insane remaining_s {found}");
+        }
+    }
+}
+
+fn real_now_ms() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_millis() as i64
+}
+
+fn set_mtime(path: &Path, offset_s: i64) {
+    let now = SystemTime::now();
+    let when = if offset_s >= 0 {
+        now + std::time::Duration::from_secs(offset_s as u64)
+    } else {
+        now - std::time::Duration::from_secs(offset_s.unsigned_abs())
+    };
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open file for mtime")
+        .set_modified(when)
+        .expect("set mtime");
+}
+
+fn plant_cache_files(cache_dir: &Path) -> [PathBuf; 3] {
+    fs::create_dir_all(cache_dir).expect("create cache directory");
+    let old = cache_dir.join("old-session.json");
+    let future = cache_dir.join("future-session.json");
+    let fresh = cache_dir.join("fresh-session.json");
+    for path in [&old, &future, &fresh] {
+        fs::write(path, "{}").expect("plant cache file");
+    }
+    set_mtime(&old, -10 * 86_400);
+    set_mtime(&future, 3 * 86_400);
+    set_mtime(&fresh, -86_400);
+    [old, future, fresh]
+}
+
+/// batch 3 #12: creating a NEW session file sweeps stale and future-dated files.
+#[test]
+fn test_new_session_file_sweeps_stale_cache_files() {
+    let env = Env::new(&["cache"]);
+    let [old, future, fresh] = plant_cache_files(&env.config().join("cache"));
+    let now_s = real_now_ms() / 1000;
+    env.render_raw(real_now_ms(), "brand-new-session", Some({
+        let mut cache = cache_json("1h", 1800, true);
+        cache["expires_at"] = json!(now_s + 1800);
+        cache
+    }));
+    assert!(env.state_file("brand-new-session").exists(), "new session file is written");
+    assert!(!old.exists(), "file older than 7 days must be deleted");
+    assert!(!future.exists(), "file with mtime > now + 1 day must be deleted");
+    assert!(fresh.exists(), "recent file must survive");
+}
+
+/// batch 3 #12: an existing session's render must not scan the directory.
+#[test]
+fn test_existing_session_render_does_not_sweep() {
+    let env = Env::new(&["cache"]);
+    let now_ms = real_now_ms();
+    let now_s = now_ms / 1000;
+    let cache = |remaining: i64| {
+        let mut cache = cache_json("1h", remaining, true);
+        cache["expires_at"] = json!(now_s + remaining);
+        cache
+    };
+    env.render_raw(now_ms, SESSION, Some(cache(1800)));
+    assert!(env.state_file(SESSION).exists());
+    let [old, future, fresh] = plant_cache_files(&env.config().join("cache"));
+    // Changed field forces a rewrite of the EXISTING session file.
+    env.render_raw(now_ms, SESSION, Some(cache(3000)));
+    assert!(old.exists() && future.exists() && fresh.exists(), "existing session must not sweep");
+}
+
+/// batch 4 sweep regression: the sweep compares mtimes (real clock) against the
+/// real clock, never `PPULSE_NOW_MS` — a far-future override must not delete a
+/// one-day-old file.
+#[test]
+fn test_sweep_ignores_ppulse_now_ms_override() {
+    const YEAR_2100_MS: i64 = 4_102_441_200_000;
+    let env = Env::new(&["cache"]);
+    let cache_dir = env.config().join("cache");
+    fs::create_dir_all(&cache_dir).expect("create cache directory");
+    let other = cache_dir.join("other-session.json");
+    fs::write(&other, "{}").expect("plant other session file");
+    set_mtime(&other, -86_400);
+    let mut cache = cache_json("1h", 1800, true);
+    cache["expires_at"] = json!(YEAR_2100_MS / 1000 + 1800);
+    env.render_raw(YEAR_2100_MS, "brand-new-session", Some(cache));
+    assert!(env.state_file("brand-new-session").exists(), "new session file is written");
+    assert!(other.exists(), "real one-day-old file must survive a year-2100 PPULSE_NOW_MS");
+}

@@ -82,12 +82,12 @@ fn command_specs(draft: &Config) -> std::collections::BTreeMap<String, CommandSp
 }
 
 fn command_focus_index(draft: &Config, name: &str, field_offset: usize) -> usize {
-    const BASE_COLORS_FOCUS_LEN: usize = 28;
+    let base_colors_focus_len = phosphorpulse::tui::screens::colors_separators(draft)[2];
     let command_index = command_specs(draft)
         .keys()
         .position(|candidate| candidate == name)
         .expect("command focus exists");
-    BASE_COLORS_FOCUS_LEN + command_index * 6 + field_offset
+    base_colors_focus_len + command_index * 6 + field_offset
 }
 
 fn focus_command(state: &mut AppState, name: &str, field_offset: usize) {

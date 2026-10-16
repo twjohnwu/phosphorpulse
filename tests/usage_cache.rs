@@ -60,6 +60,7 @@ fn test_s01_parse_and_schedule() {
             resets_at: Some(now + 1_000_000),
             is_active: true,
         }],
+        last_error: None,
     };
 
     assert_eq!(
@@ -68,6 +69,7 @@ fn test_s01_parse_and_schedule() {
             fetched_at: Some(now),
             next_fetch_at: now + 300_000,
             limits: v.clone(),
+            last_error: None,
         }
     );
     assert_eq!(
@@ -80,6 +82,7 @@ fn test_s01_parse_and_schedule() {
             fetched_at: old.fetched_at,
             next_fetch_at: now + 120_000,
             limits: old.limits.clone(),
+            last_error: Some("rate_limited".to_string()),
         }
     );
     assert_eq!(
@@ -88,6 +91,7 @@ fn test_s01_parse_and_schedule() {
             fetched_at: old.fetched_at,
             next_fetch_at: now + 300_000,
             limits: old.limits.clone(),
+            last_error: Some("rate_limited".to_string()),
         }
     );
     assert_eq!(
@@ -101,6 +105,7 @@ fn test_s01_parse_and_schedule() {
             fetched_at: old.fetched_at,
             next_fetch_at: now + 3_600_000,
             limits: old.limits.clone(),
+            last_error: Some("rate_limited".to_string()),
         }
     );
     assert_eq!(
@@ -109,6 +114,7 @@ fn test_s01_parse_and_schedule() {
             fetched_at: old.fetched_at,
             next_fetch_at: now + 300_000,
             limits: old.limits.clone(),
+            last_error: Some("rate_limited".to_string()),
         }
     );
     assert_eq!(
@@ -117,6 +123,7 @@ fn test_s01_parse_and_schedule() {
             fetched_at: old.fetched_at,
             next_fetch_at: now + 300_000,
             limits: old.limits.clone(),
+            last_error: Some("auth".to_string()),
         }
     );
     assert_eq!(
@@ -125,6 +132,7 @@ fn test_s01_parse_and_schedule() {
             fetched_at: None,
             next_fetch_at: now + 30_000,
             limits: vec![],
+            last_error: Some("other".to_string()),
         }
     );
     assert_eq!(

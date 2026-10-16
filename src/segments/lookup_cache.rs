@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    time::{Duration, UNIX_EPOCH},
+    time::SystemTime,
 };
 
 use crate::atomic_write::{clear_stale_temps, write_atomic};
@@ -32,7 +32,10 @@ fn path(directory: &Path) -> PathBuf {
 }
 fn valid(entry: Option<&Entry>, ttl: i64, now: i64) -> Option<String> {
     let entry = entry?;
-    (entry.fetched_at <= now && now - entry.fetched_at < ttl).then(|| entry.value.clone())
+    // Negative or overflowing age (clock skew, hand-edited file) counts as expired.
+    now.checked_sub(entry.fetched_at)
+        .is_some_and(|age| age >= 0 && age < ttl)
+        .then(|| entry.value.clone())
 }
 
 impl Cache {
@@ -58,9 +61,9 @@ pub fn read(directory: &Path) -> Cache {
 
 pub fn write(directory: &Path, mut cache: Cache, now_ms: i64) {
     let lookups = directory.join("lookups");
-    let now = UNIX_EPOCH + Duration::from_millis(now_ms.max(0) as u64);
     let _ = fs::create_dir_all(&lookups);
-    clear_stale_temps(&lookups, now);
+    // Temp mtimes are real time, so never use the PPULSE_NOW_MS-aware clock here.
+    clear_stale_temps(&lookups, SystemTime::now());
     cache
         .git
         .retain(|_, entry| valid(Some(entry), GIT_TTL_MS, now_ms).is_some());

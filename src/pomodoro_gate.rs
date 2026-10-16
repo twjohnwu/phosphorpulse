@@ -80,14 +80,17 @@ fn decide() -> Option<String> {
     if std::fs::metadata(&path).ok()?.len() > MAX_STATE_FILE_BYTES {
         return None;
     }
-    let state = parse_state(serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?)?;
+    let mut state = parse_state(serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()?
         .as_millis() as f64;
-    if now < state.phase_start_ms || now < state.last_activity_ms {
+    // A future phase start would make advance restart the phase from now (a fresh full
+    // rest), so let it through; a future last activity is safe to clamp and evaluate.
+    if now < state.phase_start_ms {
         return None;
     }
+    state.last_activity_ms = state.last_activity_ms.min(now);
     let minutes = work_min(&cfg);
     let (state, _) = advance(state, now, false, minutes);
     if !matches!(state.phase, Phase::ShortBreak | Phase::LongBreak) {

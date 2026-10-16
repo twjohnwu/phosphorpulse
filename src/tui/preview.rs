@@ -77,10 +77,9 @@ fn preview_config_dir() -> PathBuf {
 /// It supplies input for every registered main-row segment, so a configured
 /// segment never looks empty merely because the preview fixture lacks data.
 pub fn main_sample() -> Value {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
+    // Same clock as the renderer's `now` (honours PPULSE_NOW_MS), kept in seconds
+    // because `rate_limits.resets_at` is epoch seconds.
+    let now = phosphorpulse::clock::now_ms().div_euclid(1000);
     serde_json::json!({
         "session_id": "preview-sample",
         "session_name": "phosphorpulse",
@@ -104,7 +103,10 @@ pub fn main_sample() -> Value {
             "five_hour": { "used_percentage": 0, "resets_at": now + 2 * 3600 + 30 * 60 },
             "seven_day": { "used_percentage": 85, "resets_at": now + 5 * 86400 + 19 * 3600 }
         },
-        "cost": { "total_cost_usd": 0.42, "total_duration_ms": 2_700_000 }
+        "cost": { "total_cost_usd": 0.42, "total_duration_ms": 2_700_000 },
+        // 52m30s leaves 30s of margin before the minute boundary, so the
+        // preview always shows `52m`.
+        "prompt_cache": { "expires_at": now + 3150, "ttl": "1h", "warm": true }
     })
 }
 
@@ -116,7 +118,8 @@ pub fn subagent_sample() -> Value {
     serde_json::json!({"tasks": [{
         "name": "subagent-name", "description": "build feature X",
         "model": "claude-sonnet-5", "contextWindowSize": 200_000,
-        "tokenCount": 50_000, "startTime": now - 130_000, "effort": "medium"
+        "tokenCount": 50_000,
+        "tokenSamples": [0, 0, 20_000, 35_000, 42_000, 50_000], "startTime": now - 130_000, "effort": "medium"
     }]})
 }
 

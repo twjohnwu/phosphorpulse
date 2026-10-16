@@ -11,6 +11,9 @@ const LONG_BREAK_MIN: i64 = 15;
 const ROUNDS_PER_CYCLE: i64 = 4;
 const IDLE_STOP_MS: i64 = 10 * 60_000;
 const NOTIFY_RATE_LIMIT_MS: i64 = 30_000;
+const SESSION_MAX_AGE_MS: f64 = 7.0 * 86_400_000.0;
+const SESSION_MAX_FUTURE_MS: f64 = 86_400_000.0;
+const SESSION_MAX_ENTRIES: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Phase {
@@ -142,10 +145,40 @@ fn activity_changed(
         session_id.into(),
         json!({ "signature": signature, "lastSeenMs": now }),
     );
+    // The map is shared across sessions and never otherwise shrinks; drop entries that are
+    // stale, implausibly future (clock skew or corruption) or lack a timestamp.
+    sessions.retain(|id, entry| {
+        id == session_id
+            || entry
+                .get("lastSeenMs")
+                .and_then(Value::as_f64)
+                .is_some_and(|seen| {
+                    seen >= now - SESSION_MAX_AGE_MS && seen <= now + SESSION_MAX_FUTURE_MS
+                })
+    });
+    if sessions.len() > SESSION_MAX_ENTRIES {
+        let seen = |entry: &Value| entry.get("lastSeenMs").and_then(Value::as_f64).unwrap_or(0.0);
+        let mut ranked: Vec<(String, f64)> = sessions
+            .iter()
+            .filter(|(id, _)| id.as_str() != session_id)
+            .map(|(id, entry)| (id.clone(), seen(entry)))
+            .collect();
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+        // The current session always survives, so it takes one of the slots.
+        for (id, _) in ranked.into_iter().skip(SESSION_MAX_ENTRIES - 1) {
+            sessions.remove(&id);
+        }
+    }
     changed
 }
 
 pub(crate) fn advance(mut state: State, now: f64, changed: bool, work_min: f64) -> (State, bool) {
+    // A future timestamp (clock skew, corrupt file) would block idle-stop and the notify
+    // rate limit until the clock catches up; pull activity back like phase_start_ms below.
+    // A future notification time is dropped rather than clamped: clamping to now would
+    // still read as "just notified" and suppress the very notification it should allow.
+    state.last_activity_ms = state.last_activity_ms.min(now);
+    state.last_notified_at_ms = state.last_notified_at_ms.filter(|last| *last <= now);
     if state.phase == Phase::Stopped {
         if changed {
             state.phase = Phase::Work;

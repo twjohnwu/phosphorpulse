@@ -80,6 +80,10 @@ fn replace_file(temporary: &Path, path: &Path) -> io::Result<()> {
     }
 }
 
+/// How far ahead of `now` a temp's mtime may be before it counts as stale:
+/// concurrent writers and slight clock differences produce small leads.
+const FUTURE_TEMP_GRACE: Duration = Duration::from_secs(60);
+
 /// Best-effort hygiene for interrupted atomic writes.  Failure to inspect or
 /// remove one entry must never make a state update fail.
 pub fn clear_stale_temps(directory: &Path, now: SystemTime) {
@@ -94,10 +98,13 @@ pub fn clear_stale_temps(directory: &Path, now: SystemTime) {
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
-        let Ok(age) = now.duration_since(metadata.modified().unwrap_or(now)) else {
-            continue;
+        // A future mtime (clock skew) never ages out on its own, but a small lead is
+        // a live writer or slightly skewed clocks, so only a far-future one is stale.
+        let stale = match now.duration_since(metadata.modified().unwrap_or(now)) {
+            Ok(age) => age > Duration::from_secs(60),
+            Err(ahead) => ahead.duration() > FUTURE_TEMP_GRACE,
         };
-        if age > Duration::from_secs(60) {
+        if stale {
             let _ = fs::remove_file(entry.path());
         }
     }

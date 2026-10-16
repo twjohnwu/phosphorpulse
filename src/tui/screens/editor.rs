@@ -252,26 +252,10 @@ pub enum ColorsFocus {
     NerdFont,
 }
 
-const BASE_COLORS_FOCUS: [ColorsFocus; 28] = [
-    ColorsFocus::Depth,
-    ColorsFocus::SegmentFg("model"),
-    ColorsFocus::SegmentFg("effort"),
-    ColorsFocus::SegmentFg("git"),
-    ColorsFocus::SegmentFg("dir"),
-    ColorsFocus::SegmentFg("ctx"),
-    ColorsFocus::SegmentFg("limit5h"),
-    ColorsFocus::SegmentFg("limit7d"),
-    ColorsFocus::SegmentFg("node"),
-    ColorsFocus::SegmentFg("python"),
-    ColorsFocus::SegmentFg("version"),
-    ColorsFocus::SegmentFg("cost"),
-    ColorsFocus::SegmentFg("burn"),
-    ColorsFocus::SegmentFg("pomodoro"),
-    ColorsFocus::SegmentFg("session"),
-    ColorsFocus::SegmentFg("fastMode"),
-    ColorsFocus::SegmentFg("outputStyle"),
-    ColorsFocus::SegmentFg("thinking"),
-    ColorsFocus::SegmentFg("limitModel"),
+/// Non-segment rows that follow the per-segment colour rows. The segment rows
+/// are derived from `builtin_main_segment_ids()` so a new segment gets a colour
+/// control without a second list to keep in step.
+const BASE_COLORS_FOCUS: [ColorsFocus; 9] = [
     ColorsFocus::GaugeWidth,
     ColorsFocus::GaugeWarnPct,
     ColorsFocus::GaugeHotPct,
@@ -283,9 +267,22 @@ const BASE_COLORS_FOCUS: [ColorsFocus; 28] = [
     ColorsFocus::UsageRefreshSec,
 ];
 
+/// `flex` is a spacer with no colour of its own.
+fn colors_segment_ids() -> impl Iterator<Item = &'static str> {
+    builtin_main_segment_ids().into_iter().filter(|id| *id != "flex")
+}
+
+/// Single source for the length of the fixed part of the colours list:
+/// Depth, one row per segment, then the fixed rows.
+fn colors_base_len() -> usize {
+    1 + colors_segment_ids().count() + BASE_COLORS_FOCUS.len()
+}
+
 pub fn colors_focus(draft: &Config) -> Vec<ColorsFocus> {
     let commands = configured_commands(draft);
-    let mut focus = BASE_COLORS_FOCUS.to_vec();
+    let mut focus = vec![ColorsFocus::Depth];
+    focus.extend(colors_segment_ids().map(ColorsFocus::SegmentFg));
+    focus.extend(BASE_COLORS_FOCUS);
     for name in commands.keys() {
         focus.extend([
             ColorsFocus::CmdFg(name.clone()),
@@ -306,8 +303,9 @@ pub fn colors_focus(draft: &Config) -> Vec<ColorsFocus> {
 
 pub fn colors_separators(draft: &Config) -> Vec<usize> {
     let command_count = configured_commands(draft).len();
-    let base = BASE_COLORS_FOCUS.len();
-    let mut separators = vec![19, 25, base];
+    let base = colors_base_len();
+    let segment_end = 1 + colors_segment_ids().count();
+    let mut separators = vec![segment_end, segment_end + 6, base];
     separators.extend((1..command_count).map(|index| base + 6 * index));
     separators.push(base + 1 + 6 * command_count);
     separators
@@ -1085,7 +1083,7 @@ impl Screen for ColorsThemeScreen {
         let separators = colors_separators(&s.draft);
         let command_count = configured_commands(&s.draft).len();
         let commands_empty = command_count == 0;
-        let base = BASE_COLORS_FOCUS.len();
+        let base = colors_base_len();
         let selected = s.selected().min(focus.len() - 1);
         let mut rows = Vec::new();
         // The Colors screen's `command:` row grows one extra dim diagnostic line when
@@ -2139,7 +2137,7 @@ mod tests {
     #[test]
     fn test_s08_colors_focus_lists_new_segments() {
         let d = Config::defaults();
-        assert_eq!(colors_focus(&d).len(), 31);
+        assert_eq!(colors_focus(&d).len(), 32);
 
         let focus = colors_focus(&d);
         let pomodoro = focus
@@ -2168,9 +2166,13 @@ mod tests {
         ));
         assert!(matches!(
             focus.get(pomodoro + 6),
+            Some(ColorsFocus::SegmentFg("cache"))
+        ));
+        assert!(matches!(
+            focus.get(pomodoro + 7),
             Some(ColorsFocus::GaugeWidth)
         ));
-        assert_eq!(colors_separators(&d), [19, 25, 28, 29]);
+        assert_eq!(colors_separators(&d), [20, 26, 29, 30]);
 
         let active_template = d
             .0
@@ -2206,19 +2208,20 @@ mod tests {
 
         for (focus, expected) in [
             (0, 0),
-            (17, 17),
             (18, 18),
-            (19, 20),
-            (23, 24),
+            (19, 19),
+            (20, 21),
             (24, 25),
-            (25, 27),
+            (25, 26),
             (26, 28),
             (27, 29),
-            (28, 31),
+            (28, 30),
+            (29, 32),
+            (30, 34),
+            (31, 35),
         ] {
             assert_eq!(colors_line_index(&d, focus), expected);
         }
-        assert_eq!(30 + 4, 34);
     }
 
     /// REQ-05 / REQ-07 / S-05: limitModel and usage refresh controls occupy fixed TUI slots.
@@ -2228,7 +2231,7 @@ mod tests {
         let main_segment_ids = main_segment_ids(&Config::defaults());
         assert_eq!(main_segment_ids.len(), 20);
         assert_eq!(main_segment_ids[18], "limitModel");
-        assert_eq!(colors_focus(&d).len(), 31);
+        assert_eq!(colors_focus(&d).len(), 32);
 
         let focuses = colors_focus(&d);
 
@@ -2242,6 +2245,10 @@ mod tests {
         ));
         assert!(matches!(
             focuses.get(thinking + 2),
+            Some(ColorsFocus::SegmentFg("cache"))
+        ));
+        assert!(matches!(
+            focuses.get(thinking + 3),
             Some(ColorsFocus::GaugeWidth)
         ));
 
@@ -2266,8 +2273,8 @@ mod tests {
             Some(ColorsFocus::DirPathDepth)
         ));
 
-        assert_eq!(colors_separators(&d), [19, 25, 28, 29]);
-        assert_eq!(colors_focus(&d).len() + 4, 35);
+        assert_eq!(colors_separators(&d), [20, 26, 29, 30]);
+        assert_eq!(colors_focus(&d).len() + 4, 36);
 
         assert_eq!(
             crate::tui::draft_ops::effective_segment_fg(&d, "limitModel"),
@@ -2298,18 +2305,18 @@ mod tests {
         assert_eq!(main2[21], "cmd:zeta");
 
         let focus0 = colors_focus(&d0);
-        assert_eq!(focus0.len(), 31);
-        assert_eq!(focus0[28], ColorsFocus::CmdAdd);
-        assert_eq!(focus0[29], ColorsFocus::DirPathDepth);
-        assert_eq!(focus0[30], ColorsFocus::NerdFont);
-        assert_eq!(colors_separators(&d0), [19, 25, 28, 29]);
+        assert_eq!(focus0.len(), 32);
+        assert_eq!(focus0[29], ColorsFocus::CmdAdd);
+        assert_eq!(focus0[30], ColorsFocus::DirPathDepth);
+        assert_eq!(focus0[31], ColorsFocus::NerdFont);
+        assert_eq!(colors_separators(&d0), [20, 26, 29, 30]);
 
         let focus2 = colors_focus(&d2);
-        assert_eq!(focus2.len(), 43);
-        assert_eq!(focus2[28], ColorsFocus::CmdFg("alpha".into()));
-        assert_eq!(focus2[34], ColorsFocus::CmdFg("zeta".into()));
-        assert_eq!(focus2[40], ColorsFocus::CmdAdd);
-        assert_eq!(colors_separators(&d2), [19, 25, 28, 34, 41]);
+        assert_eq!(focus2.len(), 44);
+        assert_eq!(focus2[29], ColorsFocus::CmdFg("alpha".into()));
+        assert_eq!(focus2[35], ColorsFocus::CmdFg("zeta".into()));
+        assert_eq!(focus2[41], ColorsFocus::CmdAdd);
+        assert_eq!(colors_separators(&d2), [20, 26, 29, 35, 42]);
 
         let active_template = d2
             .0
@@ -2321,6 +2328,53 @@ mod tests {
             crate::tui::draft_ops::effective_segment_fg(&d2, "cmd:alpha"),
             theme.palette["text"]
         );
+    }
+
+    /// S-17: every builtin main segment except `flex` has a colour row, generated
+    /// from `builtin_main_segment_ids()` so a future segment cannot miss one.
+    #[test]
+    fn test_s17_colors_focus_generated_from_segment_ids() {
+        let d = Config::defaults();
+        let focus = colors_focus(&d);
+        let expected: Vec<&str> = builtin_main_segment_ids()
+            .into_iter()
+            .filter(|id| *id != "flex")
+            .collect();
+        let actual: Vec<&str> = focus
+            .iter()
+            .filter_map(|item| match item {
+                ColorsFocus::SegmentFg(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(focus[0], ColorsFocus::Depth);
+        for (offset, id) in expected.iter().enumerate() {
+            assert_eq!(focus[1 + offset], ColorsFocus::SegmentFg(id));
+        }
+
+        let seg_count = expected.len();
+        let separators = colors_separators(&d);
+        assert_eq!(
+            separators[..2],
+            [1 + seg_count, 1 + seg_count + 6]
+        );
+        assert_eq!(separators[2], focus.iter().position(|item| matches!(item, ColorsFocus::CmdAdd)).expect("CmdAdd focus"));
+        let limit_model = focus
+            .iter()
+            .position(|item| matches!(item, ColorsFocus::SegmentFg("limitModel")))
+            .expect("limitModel focus");
+        assert_eq!(focus[limit_model + 1], ColorsFocus::SegmentFg("cache"));
+    }
+
+    /// S-20 / 17b: every builtin segment (bar `flex`) has a hex default colour.
+    #[test]
+    fn test_s20_every_segment_has_default_fg() {
+        let d = Config::defaults();
+        for id in builtin_main_segment_ids().into_iter().filter(|id| *id != "flex") {
+            let fg = crate::tui::draft_ops::effective_segment_fg(&d, id);
+            assert!(fg.starts_with('#'), "segment {id:?} default fg {fg:?} is not a hex colour");
+        }
     }
 
     static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -2455,9 +2509,9 @@ mod tests {
                 serde_json::json!({"zeta": {"command": "a"}, "alpha": {"command": "b"}}),
             );
             let focus = colors_focus(&draft);
-            assert_eq!(focus[34], ColorsFocus::CmdFg("zeta".into()));
+            assert_eq!(focus[35], ColorsFocus::CmdFg("zeta".into()));
             let mut state = AppState::new(draft, ScreenId::ColorsTheme);
-            state.set_selected(34);
+            state.set_selected(35);
             let lines = draw_lines(&state, 100, 60);
             let zeta = lines
                 .iter()

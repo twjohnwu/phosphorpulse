@@ -120,8 +120,10 @@ pub fn ctx(c: &RenderContext) -> Option<Segment> {
         bold: false,
     })
 }
+const MAX_RESET_AHEAD_MS: i64 = 400 * 86_400_000;
 fn countdown(r: i64) -> String {
-    let s = (r - clock::now_ms()) / 1000;
+    // Saturating: `r` comes straight from stdin and may be any i64.
+    let s = r.saturating_sub(clock::now_ms()) / 1000;
     if s <= 0 {
         return "now".into();
     }
@@ -151,7 +153,8 @@ pub(crate) fn limit_parts(
         gauge(percent, c.gauge_width),
         percent.round() as i64
     );
-    if let Some(r) = resets_at {
+    // A reset further out than any real window is garbage: no countdown rather than `Nd`.
+    if let Some(r) = resets_at.filter(|r| *r <= clock::now_ms().saturating_add(MAX_RESET_AHEAD_MS)) {
         t += &format!(" {DIM}↺{}", countdown(r));
     }
     Segment {

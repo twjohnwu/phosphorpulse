@@ -313,8 +313,16 @@ fn assert_success(cache: &Value, next_fetch_at: i64) {
     assert_eq!(cache["limits"][0]["isActive"], json!(true));
 }
 
+/// True when the lock file is absent or nobody holds it (`try_lock` succeeds).
+fn lock_not_held(path: &Path) -> bool {
+    match fs::File::open(path) {
+        Ok(file) => file.try_lock().is_ok(),
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 fn assert_finished(case: &CaseDir, cache: &Value) {
-    assert!(!case.lock_path().exists());
+    assert!(lock_not_held(&case.lock_path()), "lock must not be held after exit");
     assert_ne!(cache["nextFetchAt"], json!(INITIAL_NEXT_FETCH_AT));
 }
 
@@ -433,15 +441,28 @@ fn test_s04_refresh_subcommand() {
 
     {
         let case = CaseDir::new(7);
-        fs::write(case.lock_path(), "other").expect("write fresh lock");
+        let holder = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(case.lock_path())
+            .expect("open lock file");
+        holder.lock().expect("hold exclusive lock");
         let server = FakeServer::new(case.cache_path());
         server.set_response(200, vec![], FIXTURE, Duration::ZERO);
         let output = case.run(&server);
         assert_eq!(output.status.code(), Some(5));
         assert_eq!(server.requests().len(), 0);
         assert_eq!(case.cache_bytes(), case.initial_cache);
-        assert_eq!(fs::read_to_string(case.lock_path()).unwrap(), "other");
         assert_silent_and_token_free(&output, &case);
+
+        drop(holder);
+        let output = case.run(&server);
+        assert_ne!(
+            output.status.code(),
+            Some(5),
+            "refresher must run once the lock is released"
+        );
     }
 
     {
@@ -621,6 +642,36 @@ fn run_render(
     let output = child.wait_with_output().expect("wait for render");
     let elapsed = start.elapsed();
     (output, elapsed)
+}
+
+/// Kernel-lock protocol: a plain lock file nobody holds (left by an old version, any mtime,
+/// including the future) must not block the refresher.
+#[test]
+fn test_unheld_plain_lock_file_is_acquired() {
+    let one_day = Duration::from_secs(86_400);
+    for (number, mtime) in [
+        (90, SystemTime::now() + one_day),
+        (91, SystemTime::now()),
+    ] {
+        let case = CaseDir::new(number);
+        fs::write(case.lock_path(), "other").expect("write plain lock");
+        fs::File::options()
+            .write(true)
+            .open(case.lock_path())
+            .expect("open plain lock")
+            .set_modified(mtime)
+            .expect("set plain lock mtime");
+        let server = FakeServer::new(case.cache_path());
+        server.set_response(200, vec![], FIXTURE, Duration::ZERO);
+        let output = case.run(&server);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "unheld plain lock (case {number}) must be acquired"
+        );
+        assert_eq!(server.requests().len(), 1);
+        assert!(lock_not_held(&case.lock_path()), "lock must not be held after exit");
+    }
 }
 
 /// REQ-03 / S-03: render claims a stale/missing cache, spawns `usage-refresh`
@@ -908,5 +959,176 @@ fn test_far_future_next_fetch_triggers_refresh() {
         assert!(output.status.success(), "far-future case B render failed: {output:?}");
         assert_eq!(case.cache_bytes(), before, "far-future case B: cache must be unchanged");
         assert_eq!(server.requests().len(), 0, "far-future case B requests");
+    }
+}
+
+/// The v0.2.8 guard needs slack above the 3600s 429 backoff clamp (render's `now` may precede
+/// the refresher's write, and clocks drift): +30s is legitimate, +120s is not.
+#[test]
+fn test_usage_guard_allows_backoff_plus_slack() {
+    let stdin_json = render_stdin_json();
+    let limits = json!([{"displayName": "Fable", "percent": 60, "resetsAt": null, "isActive": true}]);
+
+    // Within slack: untouched, no refresh requested.
+    {
+        let case = RenderDir::new(110);
+        case.write_settings(true);
+        case.write_cache(
+            serde_json::to_vec(&json!({
+                "fetchedAt": NOW - 60_000,
+                "nextFetchAt": NOW + 3_600_000 + 30_000,
+                "limits": limits
+            }))
+            .unwrap(),
+        );
+        let before = case.cache_bytes();
+        let server = FakeServer::new(case.cache_path());
+        let (output, _elapsed) =
+            run_render(&case.path, &server.url(), &case.token_file(), &stdin_json);
+        assert!(output.status.success(), "slack case within render failed: {output:?}");
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            case.cache_bytes(),
+            before,
+            "nextFetchAt = backoff + 30s must not be rewritten"
+        );
+        assert_eq!(server.requests().len(), 0, "slack case within requests");
+    }
+
+    // Beyond slack: rewritten as a claim (slow fake keeps the child from overwriting it).
+    {
+        let case = RenderDir::new(111);
+        case.write_settings(true);
+        case.write_cache(
+            serde_json::to_vec(&json!({
+                "fetchedAt": NOW - 60_000,
+                "nextFetchAt": NOW + 3_600_000 + 120_000,
+                "limits": limits
+            }))
+            .unwrap(),
+        );
+        let server = FakeServer::new(case.cache_path());
+        server.set_response(200, vec![], FIXTURE, Duration::from_millis(1200));
+        let (output, _elapsed) =
+            run_render(&case.path, &server.url(), &case.token_file(), &stdin_json);
+        assert!(output.status.success(), "slack case beyond render failed: {output:?}");
+        assert_eq!(
+            case.cache()["nextFetchAt"],
+            json!(NOW + 15_000),
+            "nextFetchAt = backoff + 120s must be rewritten as a claim"
+        );
+    }
+}
+
+/// batch 4 #16: a finished failure (`fetchedAt` null + `lastError` set) is not an
+/// in-flight claim, so render must not burn the 800ms cold-start wait on it.
+#[test]
+fn test_finished_failure_cache_does_not_block_render() {
+    let stdin_json = render_stdin_json();
+    // Warm up the freshly built binary (see test_s03_trigger_claim_and_cold_start).
+    {
+        let warm = RenderDir::new(120);
+        warm.write_settings(false);
+        let server = FakeServer::new(warm.cache_path());
+        let (output, _) = run_render(&warm.path, &server.url(), &warm.token_file(), &stdin_json);
+        assert!(output.status.success(), "warm-up render failed: {output:?}");
+    }
+    let case = RenderDir::new(121);
+    case.write_settings(true);
+    case.write_cache(
+        serde_json::to_vec(&json!({
+            "fetchedAt": null,
+            "nextFetchAt": NOW + 20_000,
+            "limits": [],
+            "lastError": "auth"
+        }))
+        .unwrap(),
+    );
+    let server = FakeServer::new(case.cache_path());
+    let (output, elapsed) = run_render(&case.path, &server.url(), &case.token_file(), &stdin_json);
+    assert!(output.status.success(), "render failed: {output:?}");
+    assert!(
+        elapsed < Duration::from_millis(400),
+        "finished failure must not wait for a refresher write: {elapsed:?}"
+    );
+    assert_eq!(server.requests().len(), 0, "backoff window: no refresh requested");
+}
+
+/// batch 4 #16: a genuine in-flight claim (`fetchedAt` null, no `lastError`) still
+/// makes render wait for the refresher's write.
+#[test]
+fn test_inflight_claim_still_waits_for_refresher_write() {
+    let stdin_json = render_stdin_json();
+    {
+        let warm = RenderDir::new(130);
+        warm.write_settings(false);
+        let server = FakeServer::new(warm.cache_path());
+        let (output, _) = run_render(&warm.path, &server.url(), &warm.token_file(), &stdin_json);
+        assert!(output.status.success(), "warm-up render failed: {output:?}");
+    }
+    let case = RenderDir::new(131);
+    case.write_settings(true);
+    case.write_cache(
+        serde_json::to_vec(&json!({
+            "nextFetchAt": NOW + 15_000,
+            "limits": []
+        }))
+        .unwrap(),
+    );
+    let server = FakeServer::new(case.cache_path());
+    let cache_path = case.cache_path();
+    let writer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(250));
+        let tmp = cache_path.with_extension("tmp-test");
+        fs::write(
+            &tmp,
+            serde_json::to_vec(&json!({
+                "fetchedAt": NOW,
+                "nextFetchAt": NOW + 300_000,
+                "limits": [{"displayName": "Fable", "percent": 65, "resetsAt": null, "isActive": true}]
+            }))
+            .unwrap(),
+        )
+        .expect("write refresher cache");
+        fs::rename(&tmp, &cache_path).expect("publish refresher cache");
+    });
+    let (output, elapsed) = run_render(&case.path, &server.url(), &case.token_file(), &stdin_json);
+    writer.join().expect("join writer");
+    let text = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    assert!(text.contains("65%"), "in-flight claim must wait for the write: {text}");
+    assert!(
+        elapsed >= Duration::from_millis(200) && elapsed < Duration::from_millis(790),
+        "elapsed: {elapsed:?}"
+    );
+}
+
+/// batch 4 #16: with no prior cache, an API failure writes a fixed `lastError`
+/// label (never the response body); a later success clears it.
+#[test]
+fn test_refresh_failure_records_fixed_last_error_label() {
+    const SECRET_BODY: &str = "SECRET-BODY-TEXT-xyz";
+    for (number, status, label) in [(140, 401_u16, "auth"), (141, 500, "other"), (142, 429, "rate_limited")] {
+        let case = CaseDir::new(number);
+        fs::remove_file(case.cache_path()).expect("remove initial cache");
+        let server = FakeServer::new(case.cache_path());
+        server.set_response(status, vec![], SECRET_BODY, Duration::ZERO);
+        let _ = case.run(&server);
+        let bytes = case.cache_bytes();
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        assert!(!text.contains(SECRET_BODY), "status {status}: body leaked into cache: {text}");
+        let cache: Value = serde_json::from_slice(&bytes).expect("parse cache");
+        assert_eq!(cache["lastError"], json!(label), "status {status}: {text}");
+        assert!(cache["fetchedAt"].is_null(), "status {status}: {text}");
+
+        // A later success clears the error.
+        server.set_response(200, vec![], FIXTURE, Duration::ZERO);
+        let output = case.run(&server);
+        assert_eq!(output.status.code(), Some(0), "stderr: {:?}", output.stderr);
+        let cache = case.cache();
+        assert_eq!(cache["fetchedAt"], json!(NOW));
+        assert!(
+            cache.get("lastError").is_none_or(Value::is_null),
+            "success must clear lastError: {cache}"
+        );
     }
 }
