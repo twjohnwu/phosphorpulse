@@ -856,3 +856,57 @@ fn test_s03_trigger_claim_and_cold_start() {
         );
     }
 }
+
+/// Bug: far-future next_fetch_at must not freeze refresh (limitModel gauge stuck for days).
+#[test]
+fn test_far_future_next_fetch_triggers_refresh() {
+    let stdin_json = render_stdin_json();
+    let limits = json!([{"displayName": "Fable", "percent": 60, "resetsAt": null, "isActive": true}]);
+
+    // Case A: next_fetch_at 2h ahead exceeds the longest legit schedule (1h),
+    // so render must claim (NOW + 15s). The slow fake response keeps the spawned
+    // child from rewriting the cache before the assertion.
+    {
+        let case = RenderDir::new(100);
+        case.write_settings(true);
+        case.write_cache(
+            serde_json::to_vec(&json!({
+                "fetchedAt": NOW - 60_000,
+                "nextFetchAt": NOW + 7_200_000,
+                "limits": limits
+            }))
+            .unwrap(),
+        );
+        let server = FakeServer::new(case.cache_path());
+        server.set_response(200, vec![], FIXTURE, Duration::from_millis(1200));
+        let (output, _elapsed) =
+            run_render(&case.path, &server.url(), &case.token_file(), &stdin_json);
+        assert!(output.status.success(), "far-future case A render failed: {output:?}");
+        assert_eq!(
+            case.cache()["nextFetchAt"],
+            json!(NOW + 15_000),
+            "far-future case A: cache must be rewritten as a claim"
+        );
+    }
+
+    // Case B (boundary): 30 min ahead is a legit schedule; cache left untouched.
+    {
+        let case = RenderDir::new(101);
+        case.write_settings(true);
+        case.write_cache(
+            serde_json::to_vec(&json!({
+                "fetchedAt": NOW - 60_000,
+                "nextFetchAt": NOW + 1_800_000,
+                "limits": limits
+            }))
+            .unwrap(),
+        );
+        let before = case.cache_bytes();
+        let server = FakeServer::new(case.cache_path());
+        let (output, _elapsed) =
+            run_render(&case.path, &server.url(), &case.token_file(), &stdin_json);
+        assert!(output.status.success(), "far-future case B render failed: {output:?}");
+        assert_eq!(case.cache_bytes(), before, "far-future case B: cache must be unchanged");
+        assert_eq!(server.requests().len(), 0, "far-future case B requests");
+    }
+}

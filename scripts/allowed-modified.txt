@@ -51,3 +51,5 @@ src/pomodoro_gate.rs
 tests/pomodoro_gate.rs
 tests/pomodoro_gate_settings.rs
 src/segments/mod.rs
+src/usage/trigger.rs
+tests/usage_refresh.rs

@@ -6,12 +6,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+// Longest legitimate schedule is the 3600s 429 backoff clamp in src/usage/mod.rs:98.
+const MAX_SCHEDULE_AHEAD_MS: i64 = 3_600_000;
+
 pub fn resolve_for_render(config_dir: &Path, now: i64) -> Option<UsageCache> {
     let path = cache::cache_path(config_dir);
     let cache = cache::read_cache(&path);
-    let needs_refresh = cache
-        .as_ref()
-        .is_none_or(|value| now >= value.next_fetch_at);
+    let needs_refresh = cache.as_ref().is_none_or(|value| {
+        now >= value.next_fetch_at
+            || value.next_fetch_at.saturating_sub(now) > MAX_SCHEDULE_AHEAD_MS
+    });
 
     if needs_refresh {
         let claim = UsageCache {
