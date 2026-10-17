@@ -19,6 +19,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Fixed
 
 - `gauge.okColor`, `gauge.warnColor` and `gauge.hotColor` now change the rendered gauge segments (`limit5h`, `limit7d`, `limitModel`, `ctx`, `cache`, subagent `ctx`). Before, they changed only the TUI swatch. The ok colour resolves as `segments.<id>.fg` (or a row's `color.fg`; `subagent.colors.ctx.fg` on the subagent line) > `gauge.okColor` > theme. Values must be `#RRGGBB`.
+- Template import accepts `subagent.colors` and `gauge.okColor` / `warnColor` / `hotColor`, so a template saved with these keys imports again.
+- Template import rejects a colour that is not `#RRGGBB` (segment, row, subagent and gauge colours). Before, such a template imported and then left the status line showing a config error.
 
 ## [0.2.9] - 2026-10-17
 

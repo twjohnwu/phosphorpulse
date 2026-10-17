@@ -249,7 +249,7 @@ pub(crate) fn is_valid_command_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
-fn is_six_digit_hex(value: &str) -> bool {
+pub fn is_six_digit_hex(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(u8::is_ascii_hexdigit)
 }

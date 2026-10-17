@@ -6,6 +6,7 @@ use std::{
 };
 
 use phosphorpulse::atomic_write::write_atomic;
+use phosphorpulse::config::model::is_six_digit_hex;
 use phosphorpulse::render::themes;
 use serde_json::Value;
 
@@ -204,6 +205,15 @@ fn string_array(value: Option<&Value>, path: &str, errors: &mut Vec<String>) {
     }
 }
 
+fn hex_color(value: Option<&Value>, path: &str, errors: &mut Vec<String>) {
+    if value.is_some_and(|value| !matches!(value.as_str(), Some(color) if is_six_digit_hex(color)))
+    {
+        errors.push(format!(
+            "instancePath \"{path}\" must match pattern \"^#[0-9A-Fa-f]{{6}}$\""
+        ));
+    }
+}
+
 fn validate_imported_template(template: &Value) -> io::Result<()> {
     let mut errors = Vec::new();
     let Some(root) = object(template, "(root)", &mut errors) else {
@@ -249,11 +259,11 @@ fn validate_imported_template(template: &Value) -> io::Result<()> {
                                 &mut errors,
                             );
                             for key in ["fg", "bg"] {
-                                if color.get(key).is_some_and(|value| !value.is_string()) {
-                                    errors.push(format!(
-                                        "instancePath \"{path}/color/{key}\" must be string"
-                                    ));
-                                }
+                                hex_color(
+                                    color.get(key),
+                                    &format!("{path}/color/{key}"),
+                                    &mut errors,
+                                );
                             }
                         }
                     }
@@ -267,9 +277,23 @@ fn validate_imported_template(template: &Value) -> io::Result<()> {
         .get("subagent")
         .and_then(|value| object(value, "/subagent", &mut errors))
     {
-        only_fields(subagent, "/subagent", &["segments"], &mut errors);
+        only_fields(subagent, "/subagent", &["segments", "colors"], &mut errors);
         required_fields(subagent, "/subagent", &["segments"], &mut errors);
         string_array(subagent.get("segments"), "/subagent/segments", &mut errors);
+        if let Some(colors) = subagent
+            .get("colors")
+            .and_then(|value| object(value, "/subagent/colors", &mut errors))
+        {
+            for (id, color) in colors {
+                let path = format!("/subagent/colors/{id}");
+                if let Some(color) = object(color, &path, &mut errors) {
+                    only_fields(color, &path, &["fg", "bg"], &mut errors);
+                    for key in ["fg", "bg"] {
+                        hex_color(color.get(key), &format!("{path}/{key}"), &mut errors);
+                    }
+                }
+            }
+        }
     }
     if let Some(gauge) = root
         .get("gauge")
@@ -278,7 +302,14 @@ fn validate_imported_template(template: &Value) -> io::Result<()> {
         only_fields(
             gauge,
             "/gauge",
-            &["barWidth", "warnPct", "hotPct"],
+            &[
+                "barWidth",
+                "warnPct",
+                "hotPct",
+                "okColor",
+                "warnColor",
+                "hotColor",
+            ],
             &mut errors,
         );
         required_fields(
@@ -291,6 +322,9 @@ fn validate_imported_template(template: &Value) -> io::Result<()> {
             if gauge.get(key).is_some_and(|value| !value.is_number()) {
                 errors.push(format!("instancePath \"/gauge/{key}\" must be number"));
             }
+        }
+        for key in ["okColor", "warnColor", "hotColor"] {
+            hex_color(gauge.get(key), &format!("/gauge/{key}"), &mut errors);
         }
     }
     if let Some(segments) = root
@@ -307,9 +341,7 @@ fn validate_imported_template(template: &Value) -> io::Result<()> {
                     &mut errors,
                 );
                 for key in ["fg", "bg"] {
-                    if segment.get(key).is_some_and(|value| !value.is_string()) {
-                        errors.push(format!("instancePath \"{path}/{key}\" must be string"));
-                    }
+                    hex_color(segment.get(key), &format!("{path}/{key}"), &mut errors);
                 }
                 if segment.get("bold").is_some_and(|value| !value.is_boolean()) {
                     errors.push(format!("instancePath \"{path}/bold\" must be boolean"));

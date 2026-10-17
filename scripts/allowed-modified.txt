@@ -66,3 +66,5 @@ README.md
 README.zh-TW.md
 docs/themes.md
 docs/themes.zh-TW.md
+src/tui/templates_io.rs
+CHANGELOG.md
