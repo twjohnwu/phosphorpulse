@@ -14,6 +14,16 @@ The TUI's Templates feature supports save-as, load, export, import, and delete (
 
 ![Templates](images/templates.png)
 
+## Color overrides
+
+You can override theme colors in the phosphorpulse config. Every value must be a `#RRGGBB` hex string.
+
+- `segments.<id>.fg` and `segments.<id>.bg` set a segment's colors on the main line.
+- `subagent.colors.<id>.fg` and `subagent.colors.<id>.bg` set colors on the subagent line. The subagent line does not inherit from `segments`, so set its colors here separately.
+- `gauge.okColor`, `gauge.warnColor` and `gauge.hotColor` color the gauge segments: `limit5h`, `limit7d`, `limitModel`, `ctx`, `cache`, and the subagent line's `ctx`.
+
+Precedence for the ok state: on the main line, a row's `color.fg` (when the row sets one) or `segments.<id>.fg` wins over `gauge.okColor`, and `gauge.okColor` wins over the theme. On the subagent line, `subagent.colors.ctx.fg` wins over `gauge.okColor`, and `gauge.okColor` wins over the theme. For the warn and hot states, `gauge.warnColor` or `gauge.hotColor` wins over the theme; segment and row colors never replace them. A `gauge.okColor`, `gauge.warnColor` or `gauge.hotColor` value that is not `#RRGGBB` fails config validation.
+
 ## Codex
 
 The TUI's **Codex Settings** screen edits the `[tui]` table in `~/.codex/config.toml`. It manages `status_line`, `status_line_use_colors`, and `theme`.

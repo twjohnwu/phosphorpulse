@@ -21,6 +21,7 @@
 ## 安裝
 
 可從 GitHub Releases 下載 prebuilt binary，或使用 Rust 從 source build。
+各版本的變更記錄在 [CHANGELOG.md](CHANGELOG.md)（英文）。
 請將 `phosphorpulse` binary 放到 `PATH` 上。
 請參閱[逐步安裝指南](docs/install.zh-TW.md)。
 

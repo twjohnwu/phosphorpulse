@@ -21,6 +21,7 @@ Single render including process startup. Both machines: median of 30 timed runs 
 ## Install
 
 Download a prebuilt binary from GitHub Releases, or build from source with Rust.
+What changed in each release is in the [changelog](CHANGELOG.md).
 Put the `phosphorpulse` binary on your `PATH`.
 See the [step-by-step installation guide](docs/install.md).
 

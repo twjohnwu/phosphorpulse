@@ -14,6 +14,16 @@ TUI 的 Templates 功能支援 save-as、load、export、import 與 delete（`d`
 
 ![範本](images/templates.zh-TW.png)
 
+## 顏色覆寫（Color overrides）
+
+可在 phosphorpulse config 中覆寫 theme 的顏色。所有值都必須是 `#RRGGBB` 格式的 hex 字串。
+
+- `segments.<id>.fg` 與 `segments.<id>.bg` 設定 main line 上 segment 的顏色。
+- `subagent.colors.<id>.fg` 與 `subagent.colors.<id>.bg` 設定 subagent line 的顏色。subagent line 不會繼承 `segments` 的設定，需在這裡另外設定。
+- `gauge.okColor`、`gauge.warnColor` 與 `gauge.hotColor` 設定 gauge segments 的顏色：`limit5h`、`limit7d`、`limitModel`、`ctx`、`cache`，以及 subagent line 的 `ctx`。
+
+ok 狀態的顏色優先順序：main line 上，row 的 `color.fg`（該 row 有設定時）或 `segments.<id>.fg` 高於 `gauge.okColor`，`gauge.okColor` 又高於 theme。subagent line 上，`subagent.colors.ctx.fg` 高於 `gauge.okColor`，`gauge.okColor` 又高於 theme。warn 與 hot 狀態則是 `gauge.warnColor`、`gauge.hotColor` 高於 theme；segment 與 row 的顏色不會取代它們。`gauge.okColor`、`gauge.warnColor`、`gauge.hotColor` 的值若不是 `#RRGGBB`，config 驗證會失敗。
+
 ## Codex
 
 TUI 的 **Codex Settings** 畫面會編輯 `~/.codex/config.toml` 中的 `[tui]` table，管理 `status_line`、`status_line_use_colors` 與 `theme`。
