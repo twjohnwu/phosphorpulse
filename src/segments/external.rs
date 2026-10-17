@@ -204,7 +204,8 @@ pub(crate) fn command_with_timeout(
 fn git(cwd: Option<String>) -> String {
     let output = match command_with_timeout(
         "git",
-        &["status", "--porcelain", "--branch"],
+        // A timeout kills git; without this, a killed index refresh can leave a stale .git/index.lock.
+        &["--no-optional-locks", "status", "--porcelain", "--branch"],
         cwd,
         lookup_timeout_ms(GIT_TIMEOUT_MS),
     ) {
