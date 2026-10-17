@@ -188,6 +188,7 @@ message_table! {
     CodexSettingsPreviewUnavailable => ("codexSettings.previewUnavailable", "preview unavailable: {error}", "預覽無法使用：{error}"),
     CodexSettingsHintActions => ("codexSettings.hintActions", "[←/→] select/move [Enter] move mode [e] tmTheme [t] themes [w] write [a/d] items [c] colors [Esc] back", "[←/→] 選擇/移動 [Enter] 移動模式 [e] tmTheme [t] 主題 [w] 寫入 [a/d] 項目 [c] 色彩 [Esc] 返回"),
     ColorsSegmentForeground => ("colors.segmentForeground", "{segment} fg: ", "{segment} 前景色："),
+    ColorsSubagentForeground => ("colors.subagentForeground", "subagent {segment} fg: ", "subagent {segment} 前景色："),
     ColorsPomodoroWorkMin => ("colors.pomodoroWorkMin", "pomodoro work min: {value}", "番茄鐘工作分鐘：{value}"),
     ColorsPomodoroRefreshSec => ("colors.pomodoroRefreshSec", "pomodoro refresh sec: {value}", "番茄鐘刷新秒數：{value}"),
     ColorsPomodoroBlockDuringRest => ("colors.pomodoroBlockDuringRest", "block prompts during break: {value}", "休息時擋下 prompt：{value}"),

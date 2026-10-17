@@ -112,6 +112,40 @@ impl Config {
                 }
             }
         }
+        if let Some(colors) = self
+            .0
+            .get("subagent")
+            .and_then(|subagent| subagent.get("colors"))
+        {
+            let colors = colors
+                .as_object()
+                .ok_or("/subagent/colors: must be an object")?;
+            for (id, segment) in colors {
+                let segment = segment
+                    .as_object()
+                    .ok_or_else(|| format!("/subagent/colors/{id}: must be an object"))?;
+                for key in ["fg", "bg"] {
+                    if let Some(color) = segment.get(key) {
+                        if !matches!(color.as_str(), Some(value) if is_six_digit_hex(value)) {
+                            return Err(format!(
+                                "/subagent/colors/{id}/{key}: must match pattern ^#[0-9A-Fa-f]{{6}}$"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(gauge) = self.0.get("gauge").and_then(Value::as_object) {
+            for key in ["okColor", "warnColor", "hotColor"] {
+                if let Some(color) = gauge.get(key) {
+                    if !matches!(color.as_str(), Some(value) if is_six_digit_hex(value)) {
+                        return Err(format!(
+                            "/gauge/{key}: must match pattern ^#[0-9A-Fa-f]{{6}}$"
+                        ));
+                    }
+                }
+            }
+        }
         if let Some(commands) = self.0.get("commands") {
             let commands = commands.as_object().ok_or("/commands: must be an object")?;
             for (name, command) in commands {

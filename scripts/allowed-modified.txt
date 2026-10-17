@@ -62,3 +62,7 @@ tests/lookup_cache.rs
 tests/usage_cache.rs
 tests/usage_local_source.rs
 tests/extreme_timestamps.rs
+README.md
+README.zh-TW.md
+docs/themes.md
+docs/themes.zh-TW.md

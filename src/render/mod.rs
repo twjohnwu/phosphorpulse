@@ -45,12 +45,23 @@ pub fn color(hex: &str, d: &str, bg: bool) -> String {
         }
     }
 }
+// Main-line segments read `segments.<id>` (then the row colour); subagent
+// segments read only `subagent.colors.<id>`.
 fn configured_color<'a>(
     id: &str,
     row: Option<&'a Value>,
     cfg: &'a Value,
     key: &str,
+    subagent: bool,
 ) -> Option<&'a str> {
+    if subagent {
+        return cfg
+            .get("subagent")
+            .and_then(|v| v.get("colors"))
+            .and_then(|v| v.get(id))
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_str);
+    }
     cfg.get("segments")
         .and_then(|v| v.get(id))
         .and_then(|v| v.get(key))
@@ -69,19 +80,40 @@ fn palette_color<'a>(value: &'a str, t: &'a Theme) -> &'a str {
     }
 }
 // Gauge segments: a configured fg replaces only the normal "ok" color, so
-// warn/hot/dim thresholds stay visible.
-fn is_gauge(id: &str) -> bool {
+// warn/hot/dim thresholds stay visible. `gauge.{ok,warn,hot}Color` recolor
+// their state for every gauge segment (a segment fg still beats okColor).
+pub fn is_gauge(id: &str) -> bool {
     matches!(id, "limit5h" | "limit7d" | "limitModel" | "ctx" | "cache")
 }
-fn wrap(id: &str, s: Segment, row: Option<&Value>, cfg: &Value, t: &Theme, d: &str) -> String {
+fn gauge_color<'a>(cfg: &'a Value, key: &str) -> Option<&'a str> {
+    cfg.get("gauge")
+        .and_then(|gauge| gauge.get(key))
+        .and_then(Value::as_str)
+}
+fn wrap(
+    id: &str,
+    s: Segment,
+    row: Option<&Value>,
+    cfg: &Value,
+    t: &Theme,
+    d: &str,
+    subagent: bool,
+) -> String {
     let fg = if id.starts_with("cmd:") && s.fg == Some("text.dim") {
         s.fg
-    } else if is_gauge(id) && !matches!(s.fg, Some("ok" | "ctx.ok")) {
-        s.fg
+    } else if is_gauge(id) {
+        match s.fg {
+            Some("ok" | "ctx.ok") => configured_color(id, row, cfg, "fg", subagent)
+                .or_else(|| gauge_color(cfg, "okColor"))
+                .or(s.fg),
+            Some("warn") => gauge_color(cfg, "warnColor").or(s.fg),
+            Some("hot") => gauge_color(cfg, "hotColor").or(s.fg),
+            _ => s.fg,
+        }
     } else {
-        configured_color(id, row, cfg, "fg").or(s.fg)
+        configured_color(id, row, cfg, "fg", subagent).or(s.fg)
     };
-    let bg = configured_color(id, row, cfg, "bg");
+    let bg = configured_color(id, row, cfg, "bg", subagent);
     let text = s
         .text
         .replace(DIM, &color(t.palette.get("text.dim").unwrap(), d, false));
@@ -303,7 +335,7 @@ fn render_value_at(
                             usage.as_ref(),
                             now,
                         )
-                        .map(|s| wrap(id, s, row, &cfg, &template, d))
+                        .map(|s| wrap(id, s, row, &cfg, &template, d, false))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -440,7 +472,7 @@ pub fn render_subagent_value(raw: Value, cfg: Value) -> String {
                     fg: Some(key),
                     bold,
                 };
-                parts.push(wrap(id, s, None, &cfg, &t, d));
+                parts.push(wrap(id, s, None, &cfg, &t, d, true));
             }
         }
         let content = parts

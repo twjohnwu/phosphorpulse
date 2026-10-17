@@ -234,6 +234,7 @@ fn apply_loaded_template(s: &mut AppState, template: Value, name: &str) {
 pub enum ColorsFocus {
     Depth,
     SegmentFg(&'static str),
+    SubagentFg(&'static str),
     GaugeWidth,
     GaugeWarnPct,
     GaugeHotPct,
@@ -273,15 +274,16 @@ fn colors_segment_ids() -> impl Iterator<Item = &'static str> {
 }
 
 /// Single source for the length of the fixed part of the colours list:
-/// Depth, one row per segment, then the fixed rows.
+/// Depth, one row per segment, one per subagent segment, then the fixed rows.
 fn colors_base_len() -> usize {
-    1 + colors_segment_ids().count() + BASE_COLORS_FOCUS.len()
+    1 + colors_segment_ids().count() + SUBAGENT_SEGMENT_IDS.len() + BASE_COLORS_FOCUS.len()
 }
 
 pub fn colors_focus(draft: &Config) -> Vec<ColorsFocus> {
     let commands = configured_commands(draft);
     let mut focus = vec![ColorsFocus::Depth];
     focus.extend(colors_segment_ids().map(ColorsFocus::SegmentFg));
+    focus.extend(SUBAGENT_SEGMENT_IDS.map(ColorsFocus::SubagentFg));
     focus.extend(BASE_COLORS_FOCUS);
     for name in commands.keys() {
         focus.extend([
@@ -305,7 +307,8 @@ pub fn colors_separators(draft: &Config) -> Vec<usize> {
     let command_count = configured_commands(draft).len();
     let base = colors_base_len();
     let segment_end = 1 + colors_segment_ids().count();
-    let mut separators = vec![segment_end, segment_end + 6, base];
+    let subagent_end = segment_end + SUBAGENT_SEGMENT_IDS.len();
+    let mut separators = vec![segment_end, subagent_end, subagent_end + 6, base];
     separators.extend((1..command_count).map(|index| base + 6 * index));
     separators.push(base + 1 + 6 * command_count);
     separators
@@ -964,6 +967,9 @@ fn colors_adjustment(s: &AppState, current: &ColorsFocus, direction: i8) -> Opti
         ColorsFocus::SegmentFg(segment) => {
             Some(draft_ops::cycle_segment_fg(&s.draft, segment, direction))
         }
+        ColorsFocus::SubagentFg(segment) => {
+            Some(draft_ops::cycle_subagent_fg(&s.draft, segment, direction))
+        }
         ColorsFocus::GaugeWidth => Some(draft_ops::adjust_gauge_bar_width(&s.draft, direction)),
         ColorsFocus::GaugeWarnPct => Some(draft_ops::adjust_gauge_warn_pct(&s.draft, direction)),
         ColorsFocus::GaugeHotPct => Some(draft_ops::adjust_gauge_hot_pct(&s.draft, direction)),
@@ -1137,6 +1143,22 @@ impl Screen for ColorsThemeScreen {
                             t(
                                 s.lang,
                                 &Key::ColorsSegmentForeground,
+                                &[("segment", segment)]
+                            )
+                        )),
+                        Span::styled(label, Style::default().fg(hex_color(&hex).unwrap_or(TEXT))),
+                    ])
+                }
+                ColorsFocus::SubagentFg(segment) => {
+                    let hex = draft_ops::effective_subagent_fg(&s.draft, segment);
+                    let label = draft_ops::named_color(&hex)
+                        .map_or_else(|| hex.clone(), |(_, name)| name.into());
+                    Line::from(vec![
+                        Span::raw(format!(
+                            "{marker} {}",
+                            t(
+                                s.lang,
+                                &Key::ColorsSubagentForeground,
                                 &[("segment", segment)]
                             )
                         )),
@@ -1433,6 +1455,11 @@ impl Screen for ColorsThemeScreen {
                     ColorsFocus::SegmentFg(segment) => segment_fg_hint(&s.draft, segment),
                     ColorsFocus::CmdFg(name) => {
                         segment_fg_hint(&s.draft, &format!("cmd:{name}"))
+                    }
+                    ColorsFocus::SubagentFg(segment) => {
+                        let hex = draft_ops::effective_subagent_fg(&s.draft, segment);
+                        draft_ops::named_color(&hex)
+                            .map_or("(-/58)".into(), |(index, _)| format!("({index}/58)"))
                     }
                     ColorsFocus::GaugeColor(state) => {
                         let hex = draft_ops::effective_gauge_color(&s.draft, state);
@@ -2137,7 +2164,7 @@ mod tests {
     #[test]
     fn test_s08_colors_focus_lists_new_segments() {
         let d = Config::defaults();
-        assert_eq!(colors_focus(&d).len(), 32);
+        assert_eq!(colors_focus(&d).len(), 40);
 
         let focus = colors_focus(&d);
         let pomodoro = focus
@@ -2170,9 +2197,13 @@ mod tests {
         ));
         assert!(matches!(
             focus.get(pomodoro + 7),
+            Some(ColorsFocus::SubagentFg("name"))
+        ));
+        assert!(matches!(
+            focus.get(pomodoro + 15),
             Some(ColorsFocus::GaugeWidth)
         ));
-        assert_eq!(colors_separators(&d), [20, 26, 29, 30]);
+        assert_eq!(colors_separators(&d), [20, 28, 34, 37, 38]);
 
         let active_template = d
             .0
@@ -2213,12 +2244,12 @@ mod tests {
             (20, 21),
             (24, 25),
             (25, 26),
-            (26, 28),
-            (27, 29),
+            (27, 28),
             (28, 30),
-            (29, 32),
-            (30, 34),
-            (31, 35),
+            (33, 35),
+            (34, 37),
+            (37, 41),
+            (39, 44),
         ] {
             assert_eq!(colors_line_index(&d, focus), expected);
         }
@@ -2231,7 +2262,7 @@ mod tests {
         let main_segment_ids = main_segment_ids(&Config::defaults());
         assert_eq!(main_segment_ids.len(), 20);
         assert_eq!(main_segment_ids[18], "limitModel");
-        assert_eq!(colors_focus(&d).len(), 32);
+        assert_eq!(colors_focus(&d).len(), 40);
 
         let focuses = colors_focus(&d);
 
@@ -2249,7 +2280,7 @@ mod tests {
         ));
         assert!(matches!(
             focuses.get(thinking + 3),
-            Some(ColorsFocus::GaugeWidth)
+            Some(ColorsFocus::SubagentFg("name"))
         ));
 
         let pomodoro_work = focuses
@@ -2273,8 +2304,8 @@ mod tests {
             Some(ColorsFocus::DirPathDepth)
         ));
 
-        assert_eq!(colors_separators(&d), [20, 26, 29, 30]);
-        assert_eq!(colors_focus(&d).len() + 4, 36);
+        assert_eq!(colors_separators(&d), [20, 28, 34, 37, 38]);
+        assert_eq!(colors_focus(&d).len() + 5, 45);
 
         assert_eq!(
             crate::tui::draft_ops::effective_segment_fg(&d, "limitModel"),
@@ -2305,18 +2336,18 @@ mod tests {
         assert_eq!(main2[21], "cmd:zeta");
 
         let focus0 = colors_focus(&d0);
-        assert_eq!(focus0.len(), 32);
-        assert_eq!(focus0[29], ColorsFocus::CmdAdd);
-        assert_eq!(focus0[30], ColorsFocus::DirPathDepth);
-        assert_eq!(focus0[31], ColorsFocus::NerdFont);
-        assert_eq!(colors_separators(&d0), [20, 26, 29, 30]);
+        assert_eq!(focus0.len(), 40);
+        assert_eq!(focus0[37], ColorsFocus::CmdAdd);
+        assert_eq!(focus0[38], ColorsFocus::DirPathDepth);
+        assert_eq!(focus0[39], ColorsFocus::NerdFont);
+        assert_eq!(colors_separators(&d0), [20, 28, 34, 37, 38]);
 
         let focus2 = colors_focus(&d2);
-        assert_eq!(focus2.len(), 44);
-        assert_eq!(focus2[29], ColorsFocus::CmdFg("alpha".into()));
-        assert_eq!(focus2[35], ColorsFocus::CmdFg("zeta".into()));
-        assert_eq!(focus2[41], ColorsFocus::CmdAdd);
-        assert_eq!(colors_separators(&d2), [20, 26, 29, 35, 42]);
+        assert_eq!(focus2.len(), 52);
+        assert_eq!(focus2[37], ColorsFocus::CmdFg("alpha".into()));
+        assert_eq!(focus2[43], ColorsFocus::CmdFg("zeta".into()));
+        assert_eq!(focus2[49], ColorsFocus::CmdAdd);
+        assert_eq!(colors_separators(&d2), [20, 28, 34, 37, 43, 50]);
 
         let active_template = d2
             .0
@@ -2356,10 +2387,10 @@ mod tests {
         let seg_count = expected.len();
         let separators = colors_separators(&d);
         assert_eq!(
-            separators[..2],
-            [1 + seg_count, 1 + seg_count + 6]
+            separators[..3],
+            [1 + seg_count, 1 + seg_count + 8, 1 + seg_count + 8 + 6]
         );
-        assert_eq!(separators[2], focus.iter().position(|item| matches!(item, ColorsFocus::CmdAdd)).expect("CmdAdd focus"));
+        assert_eq!(separators[3], focus.iter().position(|item| matches!(item, ColorsFocus::CmdAdd)).expect("CmdAdd focus"));
         let limit_model = focus
             .iter()
             .position(|item| matches!(item, ColorsFocus::SegmentFg("limitModel")))
@@ -2509,9 +2540,9 @@ mod tests {
                 serde_json::json!({"zeta": {"command": "a"}, "alpha": {"command": "b"}}),
             );
             let focus = colors_focus(&draft);
-            assert_eq!(focus[35], ColorsFocus::CmdFg("zeta".into()));
+            assert_eq!(focus[43], ColorsFocus::CmdFg("zeta".into()));
             let mut state = AppState::new(draft, ScreenId::ColorsTheme);
-            state.set_selected(35);
+            state.set_selected(43);
             let lines = draw_lines(&state, 100, 60);
             let zeta = lines
                 .iter()

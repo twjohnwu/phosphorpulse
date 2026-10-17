@@ -82,7 +82,7 @@ fn command_specs(draft: &Config) -> std::collections::BTreeMap<String, CommandSp
 }
 
 fn command_focus_index(draft: &Config, name: &str, field_offset: usize) -> usize {
-    let base_colors_focus_len = phosphorpulse::tui::screens::colors_separators(draft)[2];
+    let base_colors_focus_len = phosphorpulse::tui::screens::colors_separators(draft)[3];
     let command_index = command_specs(draft)
         .keys()
         .position(|candidate| candidate == name)

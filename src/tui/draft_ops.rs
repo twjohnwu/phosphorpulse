@@ -262,31 +262,48 @@ fn effective_fg(draft: &Config, segment: &str) -> String {
         .and_then(Value::as_object)
         .and_then(|config| config.get("fg"))
         .and_then(Value::as_str);
-    let effective = match configured.unwrap_or(segment) {
-        "model" | "dir" | "pomodoro" | "pomodoro.work" => "#00CF41",
-        "effort" => "#008F11",
-        "git" | "git.ok" | "ctx" | "ctx.ok" | "pomodoro.break" => "#00CDCD",
-        "limit5h" | "limit7d" | "limitModel" | "cache" | "ok" => "#00FF41",
-        "node" | "python" => "#00E5FF",
-        "version" => "#969696",
-        "cost" | "burn" => "#008F11",
-        "clock" => "#003232",
-        "session" => "#00CF41",
-        "outputStyle" => "#969696",
-        "fastMode" | "thinking" => "#FF7F50",
-        id if id.starts_with("cmd:") => return theme_text_fg(draft),
-        value => value,
-    };
-    match effective {
-        "text" => "#00FF41".into(),
-        value => value.into(),
+    let role = configured
+        .or_else(|| gauge_ok_color(draft, segment))
+        .unwrap_or_else(|| segment_palette_role(segment));
+    if role.starts_with('#') {
+        return role.into();
+    }
+    theme_palette(draft, role)
+}
+
+/// `gauge.okColor` for gauge segments: the renderer applies it below a
+/// configured fg and above the theme role.
+fn gauge_ok_color<'a>(draft: &'a Config, segment: &str) -> Option<&'a str> {
+    if !phosphorpulse::render::is_gauge(segment) {
+        return None;
+    }
+    draft
+        .0
+        .get("gauge")
+        .and_then(|gauge| gauge.get("okColor"))
+        .and_then(Value::as_str)
+}
+
+/// The palette role each segment emits in the renderer.
+fn segment_palette_role(segment: &str) -> &str {
+    match segment {
+        "session" => "dir",
+        "outputStyle" => "version",
+        "git" => "git.ok",
+        "ctx" => "ctx.ok",
+        "limit5h" | "limit7d" | "limitModel" | "cache" => "ok",
+        "pomodoro" => "pomodoro.work",
+        "fastMode" | "thinking" => "warn",
+        id if id.starts_with("cmd:") => "text",
+        id => id,
     }
 }
 
-/// The active theme's `text` palette entry, matching how the renderer
-/// resolves the `text` role for `cmd:*` segments (see `render::mod::wrap`,
-/// which reads `s.fg == Some("text")` through `palette_color`).
-fn theme_text_fg(draft: &Config) -> String {
+/// The active theme's palette entry for `role`, matching how the renderer
+/// resolves palette roles (`render::mod::palette_color`); user template names
+/// fall back to matrix-tron like `themes::builtin`. A role the palette lacks
+/// (for example a bare segment id) is returned as-is.
+fn theme_palette(draft: &Config, role: &str) -> String {
     let active_template = draft
         .0
         .get("activeTemplate")
@@ -294,9 +311,9 @@ fn theme_text_fg(draft: &Config) -> String {
         .unwrap_or("matrix-tron");
     phosphorpulse::render::themes::builtin(active_template)
         .palette
-        .get("text")
+        .get(role)
         .cloned()
-        .unwrap_or_else(|| "#00FF41".into())
+        .unwrap_or_else(|| role.into())
 }
 
 pub fn add_row(draft: &Config, segments: Vec<String>) -> Config {
@@ -447,23 +464,20 @@ pub fn cycle_segment_fg(draft: &Config, segment: &str, direction: i8) -> Config 
     next
 }
 
-/// The effective matrix-tron palette color for `gauge.<state>Color`, matching
-/// the frozen TUI when no draft override has been selected yet.
+/// The effective color for `gauge.<state>Color`: the draft override, else the
+/// active theme's palette entry for that state.
 pub fn effective_gauge_color(draft: &Config, state: &str) -> String {
-    let default = match state {
-        "ok" => "#00FF41",
-        "warn" => "#FF7F50",
-        "hot" => "#FF3737",
-        _ => return String::new(),
-    };
+    if !matches!(state, "ok" | "warn" | "hot") {
+        return String::new();
+    }
     draft
         .0
         .get("gauge")
         .and_then(Value::as_object)
         .and_then(|gauge| gauge.get(&format!("{state}Color")))
         .and_then(Value::as_str)
-        .unwrap_or(default)
-        .into()
+        .map(String::from)
+        .unwrap_or_else(|| theme_palette(draft, state))
 }
 
 /// Cycles the named-color catalogue into `gauge.<state>Color`, just as the
@@ -596,5 +610,54 @@ pub fn move_subagent_segment(draft: &Config, index: usize, direction: i8) -> Con
     }
     let destination = (index as i32 + direction as i32).rem_euclid(segments.len() as i32) as usize;
     segments.swap(index, destination);
+    next
+}
+
+/// The palette role each subagent segment emits in the renderer.
+fn subagent_palette_role(segment: &str) -> &str {
+    match segment {
+        "name" => "sub.name",
+        "model" => "sub.model",
+        "elapsed" => "sub.elapsed",
+        "ctx" => "ok",
+        "desc" | "tokenCount" | "activity" => "text.dim",
+        id => id,
+    }
+}
+
+/// The effective colour for `subagent.colors.<id>.fg`: the draft override,
+/// else the active theme's palette entry for the role the renderer emits.
+pub fn effective_subagent_fg(draft: &Config, segment: &str) -> String {
+    let configured = draft
+        .0
+        .get("subagent")
+        .and_then(|subagent| subagent.get("colors"))
+        .and_then(|colors| colors.get(segment))
+        .and_then(|config| config.get("fg"))
+        .and_then(Value::as_str);
+    let ok_color = if segment == "ctx" {
+        gauge_ok_color(draft, segment)
+    } else {
+        None
+    };
+    match configured.or(ok_color) {
+        Some(color) => color.into(),
+        None => theme_palette(draft, subagent_palette_role(segment)),
+    }
+}
+
+/// Cycles the named colours into `subagent.colors.<id>.fg`.
+pub fn cycle_subagent_fg(draft: &Config, segment: &str, direction: i8) -> Config {
+    let mut next = draft.clone();
+    let Some(direction) = step(direction) else {
+        return next;
+    };
+    let current = effective_subagent_fg(draft, segment);
+    let color = NAMED_COLORS[cycle_index(&NAMED_COLORS, &current, direction)];
+    object_field(
+        object_field(object_field(&mut next.0, "subagent"), "colors"),
+        segment,
+    )
+    .insert("fg".into(), Value::String(color.into()));
     next
 }
