@@ -68,3 +68,5 @@ docs/themes.md
 docs/themes.zh-TW.md
 src/tui/templates_io.rs
 CHANGELOG.md
+tests/subagent_colors.rs
+tests/ctx_split.rs

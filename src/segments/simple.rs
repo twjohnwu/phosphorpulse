@@ -97,26 +97,48 @@ pub fn dir(c: &RenderContext) -> Option<Segment> {
         bold: true,
     })
 }
+fn ctx_gauge_text(p: f64, c: &RenderContext) -> String {
+    format!("⬡ {} {}%", gauge(p, c.gauge_width), p.round() as i64)
+}
+fn ctx_tokens_text(c: &RenderContext) -> Option<String> {
+    let (a, b, d, e) = (
+        c.total_input_tokens?,
+        c.total_output_tokens?,
+        c.cache_read_input_tokens?,
+        c.cache_creation_input_tokens?,
+    );
+    Some(format!(
+        "↑{} ↓{} cr:{} cw:{}",
+        tokens(a),
+        tokens(b),
+        tokens(d),
+        tokens(e)
+    ))
+}
 pub fn ctx(c: &RenderContext) -> Option<Segment> {
     let p = c.context_used_percentage?;
-    let mut t = format!("⬡ {} {}%", gauge(p, c.gauge_width), p.round() as i64);
-    if let (Some(a), Some(b), Some(d), Some(e)) = (
-        c.total_input_tokens,
-        c.total_output_tokens,
-        c.cache_read_input_tokens,
-        c.cache_creation_input_tokens,
-    ) {
-        t += &format!(
-            " {DIM}↑{} ↓{} cr:{} cw:{}",
-            tokens(a),
-            tokens(b),
-            tokens(d),
-            tokens(e)
-        );
+    let mut t = ctx_gauge_text(p, c);
+    if let Some(tail) = ctx_tokens_text(c) {
+        t += &format!(" {DIM}{tail}");
     }
     Some(Segment {
         text: t,
         fg: Some(gauge_color(p, c, true)),
+        bold: false,
+    })
+}
+pub fn ctx_gauge(c: &RenderContext) -> Option<Segment> {
+    let p = c.context_used_percentage?;
+    Some(Segment {
+        text: ctx_gauge_text(p, c),
+        fg: Some(gauge_color(p, c, true)),
+        bold: false,
+    })
+}
+pub fn ctx_tokens(c: &RenderContext) -> Option<Segment> {
+    ctx_tokens_text(c).map(|text| Segment {
+        text,
+        fg: Some("text.dim"),
         bold: false,
     })
 }

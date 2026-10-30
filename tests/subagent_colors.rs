@@ -272,9 +272,9 @@ fn test_c08_cycle_subagent_fg_writes_subagent_colors() {
 }
 
 /// 7: the colour screen gains one Subagent section (8 rows) between the main
-/// segment rows (ends at 20) and the gauge rows: [20, 20+8, 26+8, 29+8, 30+8].
+/// segment rows (ends at 22) and the gauge rows: [22, 22+8, 28+8, 31+8, 32+8].
 #[test]
 fn test_c09_colors_separators_include_subagent_section() {
     let draft = base("matrix-tron");
-    assert_eq!(colors_separators(&draft), [20, 28, 34, 37, 38]);
+    assert_eq!(colors_separators(&draft), [22, 30, 36, 39, 40]);
 }

@@ -83,7 +83,7 @@ fn palette_color<'a>(value: &'a str, t: &'a Theme) -> &'a str {
 // warn/hot/dim thresholds stay visible. `gauge.{ok,warn,hot}Color` recolor
 // their state for every gauge segment (a segment fg still beats okColor).
 pub fn is_gauge(id: &str) -> bool {
-    matches!(id, "limit5h" | "limit7d" | "limitModel" | "ctx" | "cache")
+    matches!(id, "limit5h" | "limit7d" | "limitModel" | "ctx" | "ctxGauge" | "cache")
 }
 fn gauge_color<'a>(cfg: &'a Value, key: &str) -> Option<&'a str> {
     cfg.get("gauge")
@@ -147,6 +147,8 @@ fn segment(
         "effort" => simple::effort(c),
         "dir" => simple::dir(c),
         "ctx" => simple::ctx(c),
+        "ctxGauge" => simple::ctx_gauge(c),
+        "ctxTokens" => simple::ctx_tokens(c),
         "limit5h" => simple::limit5h(c),
         "limit7d" => simple::limit7d(c),
         "limitModel" => Some(simple::limit_model(usage, now, c)),

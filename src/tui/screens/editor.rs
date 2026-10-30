@@ -47,12 +47,13 @@ pub struct SettingsInstallScreen;
 pub struct SaveExitScreen;
 
 /// The first 14 IDs keep the frozen TS `listMainSegments()` order; the next 5
-/// were added by the stdin-extra-segments change; `cache` was appended after them.
-const fn builtin_main_segment_ids() -> [&'static str; 20] {
+/// were added by the stdin-extra-segments change; `cache` was appended after
+/// them, then `ctxGauge` and `ctxTokens`.
+const fn builtin_main_segment_ids() -> [&'static str; 22] {
     [
         "model", "effort", "git", "dir", "ctx", "limit5h", "limit7d", "node", "python",
         "version", "cost", "burn", "pomodoro", "flex", "session", "fastMode", "outputStyle",
-        "thinking", "limitModel", "cache",
+        "thinking", "limitModel", "cache", "ctxGauge", "ctxTokens",
     ]
 }
 
@@ -2124,7 +2125,7 @@ mod tests {
     #[test]
     fn test_s04_picker_ids_and_builtin_rows() {
         let ids = main_segment_ids(&Config::defaults());
-        assert_eq!(ids.len(), 20);
+        assert_eq!(ids.len(), 22);
         assert_eq!(
             ids[..14].iter().map(String::as_str).collect::<Vec<_>>(),
             [
@@ -2134,7 +2135,10 @@ mod tests {
         );
         assert_eq!(
             ids[14..].iter().map(String::as_str).collect::<Vec<_>>(),
-            ["session", "fastMode", "outputStyle", "thinking", "limitModel", "cache"]
+            [
+                "session", "fastMode", "outputStyle", "thinking", "limitModel", "cache",
+                "ctxGauge", "ctxTokens",
+            ]
         );
         assert_eq!(
             SUBAGENT_SEGMENT_IDS,
@@ -2164,7 +2168,7 @@ mod tests {
     #[test]
     fn test_s08_colors_focus_lists_new_segments() {
         let d = Config::defaults();
-        assert_eq!(colors_focus(&d).len(), 40);
+        assert_eq!(colors_focus(&d).len(), 42);
 
         let focus = colors_focus(&d);
         let pomodoro = focus
@@ -2197,13 +2201,21 @@ mod tests {
         ));
         assert!(matches!(
             focus.get(pomodoro + 7),
+            Some(ColorsFocus::SegmentFg("ctxGauge"))
+        ));
+        assert!(matches!(
+            focus.get(pomodoro + 8),
+            Some(ColorsFocus::SegmentFg("ctxTokens"))
+        ));
+        assert!(matches!(
+            focus.get(pomodoro + 9),
             Some(ColorsFocus::SubagentFg("name"))
         ));
         assert!(matches!(
-            focus.get(pomodoro + 15),
+            focus.get(pomodoro + 17),
             Some(ColorsFocus::GaugeWidth)
         ));
-        assert_eq!(colors_separators(&d), [20, 28, 34, 37, 38]);
+        assert_eq!(colors_separators(&d), [22, 30, 36, 39, 40]);
 
         let active_template = d
             .0
@@ -2241,15 +2253,17 @@ mod tests {
             (0, 0),
             (18, 18),
             (19, 19),
-            (20, 21),
-            (24, 25),
-            (25, 26),
+            (20, 20),
+            (21, 21),
+            (22, 23),
+            (26, 27),
             (27, 28),
-            (28, 30),
-            (33, 35),
-            (34, 37),
-            (37, 41),
-            (39, 44),
+            (29, 30),
+            (30, 32),
+            (35, 37),
+            (36, 39),
+            (39, 43),
+            (41, 46),
         ] {
             assert_eq!(colors_line_index(&d, focus), expected);
         }
@@ -2260,9 +2274,9 @@ mod tests {
     fn test_s05_limit_model_tui_constants() {
         let d = Config::defaults();
         let main_segment_ids = main_segment_ids(&Config::defaults());
-        assert_eq!(main_segment_ids.len(), 20);
+        assert_eq!(main_segment_ids.len(), 22);
         assert_eq!(main_segment_ids[18], "limitModel");
-        assert_eq!(colors_focus(&d).len(), 40);
+        assert_eq!(colors_focus(&d).len(), 42);
 
         let focuses = colors_focus(&d);
 
@@ -2280,6 +2294,14 @@ mod tests {
         ));
         assert!(matches!(
             focuses.get(thinking + 3),
+            Some(ColorsFocus::SegmentFg("ctxGauge"))
+        ));
+        assert!(matches!(
+            focuses.get(thinking + 4),
+            Some(ColorsFocus::SegmentFg("ctxTokens"))
+        ));
+        assert!(matches!(
+            focuses.get(thinking + 5),
             Some(ColorsFocus::SubagentFg("name"))
         ));
 
@@ -2304,8 +2326,8 @@ mod tests {
             Some(ColorsFocus::DirPathDepth)
         ));
 
-        assert_eq!(colors_separators(&d), [20, 28, 34, 37, 38]);
-        assert_eq!(colors_focus(&d).len() + 5, 45);
+        assert_eq!(colors_separators(&d), [22, 30, 36, 39, 40]);
+        assert_eq!(colors_focus(&d).len() + 5, 47);
 
         assert_eq!(
             crate::tui::draft_ops::effective_segment_fg(&d, "limitModel"),
@@ -2327,27 +2349,27 @@ mod tests {
         );
 
         let main0 = main_segment_ids(&d0);
-        assert_eq!(main0.len(), 20);
+        assert_eq!(main0.len(), 22);
         assert_eq!(main0[18], "limitModel");
 
         let main2 = main_segment_ids(&d2);
-        assert_eq!(main2.len(), 22);
-        assert_eq!(main2[20], "cmd:alpha");
-        assert_eq!(main2[21], "cmd:zeta");
+        assert_eq!(main2.len(), 24);
+        assert_eq!(main2[22], "cmd:alpha");
+        assert_eq!(main2[23], "cmd:zeta");
 
         let focus0 = colors_focus(&d0);
-        assert_eq!(focus0.len(), 40);
-        assert_eq!(focus0[37], ColorsFocus::CmdAdd);
-        assert_eq!(focus0[38], ColorsFocus::DirPathDepth);
-        assert_eq!(focus0[39], ColorsFocus::NerdFont);
-        assert_eq!(colors_separators(&d0), [20, 28, 34, 37, 38]);
+        assert_eq!(focus0.len(), 42);
+        assert_eq!(focus0[39], ColorsFocus::CmdAdd);
+        assert_eq!(focus0[40], ColorsFocus::DirPathDepth);
+        assert_eq!(focus0[41], ColorsFocus::NerdFont);
+        assert_eq!(colors_separators(&d0), [22, 30, 36, 39, 40]);
 
         let focus2 = colors_focus(&d2);
-        assert_eq!(focus2.len(), 52);
-        assert_eq!(focus2[37], ColorsFocus::CmdFg("alpha".into()));
-        assert_eq!(focus2[43], ColorsFocus::CmdFg("zeta".into()));
-        assert_eq!(focus2[49], ColorsFocus::CmdAdd);
-        assert_eq!(colors_separators(&d2), [20, 28, 34, 37, 43, 50]);
+        assert_eq!(focus2.len(), 54);
+        assert_eq!(focus2[39], ColorsFocus::CmdFg("alpha".into()));
+        assert_eq!(focus2[45], ColorsFocus::CmdFg("zeta".into()));
+        assert_eq!(focus2[51], ColorsFocus::CmdAdd);
+        assert_eq!(colors_separators(&d2), [22, 30, 36, 39, 45, 52]);
 
         let active_template = d2
             .0
@@ -2540,9 +2562,9 @@ mod tests {
                 serde_json::json!({"zeta": {"command": "a"}, "alpha": {"command": "b"}}),
             );
             let focus = colors_focus(&draft);
-            assert_eq!(focus[43], ColorsFocus::CmdFg("zeta".into()));
+            assert_eq!(focus[45], ColorsFocus::CmdFg("zeta".into()));
             let mut state = AppState::new(draft, ScreenId::ColorsTheme);
-            state.set_selected(43);
+            state.set_selected(45);
             let lines = draw_lines(&state, 100, 60);
             let zeta = lines
                 .iter()
