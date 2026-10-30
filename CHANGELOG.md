@@ -3,7 +3,7 @@
 All notable changes to phosphorpulse are listed here, newest first.
 The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-30
 
 ### Added
 
@@ -151,6 +151,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - `phosphorpulse migrate`, which copies a whitelist of settings from phosphorflux.
 - Prebuilt binaries for four targets, with SHA-256 checksums.
 
+[0.4.0]: https://github.com/twjohnwu/phosphorpulse/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/twjohnwu/phosphorpulse/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/twjohnwu/phosphorpulse/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/twjohnwu/phosphorpulse/compare/v0.2.7...v0.2.8
