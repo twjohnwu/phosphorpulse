@@ -20,7 +20,7 @@ TUI 的 Templates 功能支援 save-as、load、export、import 與 delete（`d`
 
 - `segments.<id>.fg` 與 `segments.<id>.bg` 設定 main line 上 segment 的顏色。
 - `subagent.colors.<id>.fg` 與 `subagent.colors.<id>.bg` 設定 subagent line 的顏色。subagent line 不會繼承 `segments` 的設定，需在這裡另外設定。
-- `gauge.okColor`、`gauge.warnColor` 與 `gauge.hotColor` 設定 gauge segments 的顏色：`limit5h`、`limit7d`、`limitModel`、`ctx`、`cache`，以及 subagent line 的 `ctx`。
+- `gauge.okColor`、`gauge.warnColor` 與 `gauge.hotColor` 設定 gauge segments 的顏色：`limit5h`、`limit7d`、`limitModel`、`ctx`、`ctxGauge`、`cache`，以及 subagent line 的 `ctx`。`ctxTokens` 不是 gauge：不論門檻，它都維持自己的顏色（`segments.ctxTokens.fg`，預設為主題的 dim 文字色）。
 
 ok 狀態的顏色優先順序：main line 上，row 的 `color.fg`（該 row 有設定時）或 `segments.<id>.fg` 高於 `gauge.okColor`，`gauge.okColor` 又高於 theme。subagent line 上，`subagent.colors.ctx.fg` 高於 `gauge.okColor`，`gauge.okColor` 又高於 theme。warn 與 hot 狀態則是 `gauge.warnColor`、`gauge.hotColor` 高於 theme；segment 與 row 的顏色不會取代它們。`gauge.okColor`、`gauge.warnColor`、`gauge.hotColor` 的值若不是 `#RRGGBB`，config 驗證會失敗。
 

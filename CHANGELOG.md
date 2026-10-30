@@ -3,6 +3,14 @@
 All notable changes to phosphorpulse are listed here, newest first.
 The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `ctxGauge` segment: the context gauge alone (`⬡ ▰▰▱▱ 42%`). It is a gauge, so it changes colour at the warn and hot thresholds and follows `gauge.okColor` / `warnColor` / `hotColor`.
+- `ctxTokens` segment: the context token counts alone (`↑in ↓out cr:read cw:create`). It uses a fixed colour, the theme's dim text by default or `segments.ctxTokens.fg`, and is hidden when the token counts are missing.
+- `ctx` is unchanged. `ctxGauge` and `ctxTokens` show the same pieces as `ctx`, each with its own padding.
+
 ## [0.3.0] - 2026-10-17
 
 ### Changed
