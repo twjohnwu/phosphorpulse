@@ -43,6 +43,8 @@ Add these statusline entries to `~/.claude/settings.json`:
 }
 ```
 
+The `subagentStatusLine` entry only works on Claude Code before 2.1.323. Version 2.1.323 removed the `subagentStatusLine` setting, and subagent rows then use Claude Code's default look.
+
 `refreshInterval: 1` keeps time-based segments (pomodoro, clock, reset countdowns) ticking every second; a render costs about 0.7% of one core.
 
 The TUI's **Settings & Install** screen, or the first-run setup wizard, can add these entries automatically. It shows a diff, asks for confirmation, and backs up the existing `settings.json` before writing.
@@ -52,7 +54,7 @@ The TUI's **Settings & Install** screen, or the first-run setup wizard, can add 
 | Command | Description |
 | --- | --- |
 | `phosphorpulse render` | Reads Claude Code statusline JSON from stdin and prints the rendered statusline. |
-| `phosphorpulse render --subagent` | Does the same for the subagent statusline. |
+| `phosphorpulse render --subagent` | Does the same for the subagent statusline. Only works on Claude Code before 2.1.323, which removed `subagentStatusLine`. |
 | `phosphorpulse config` | Prints the active configuration and its sources. |
 | `phosphorpulse migrate` | Copies configuration from phosphorflux. |
 | `phosphorpulse migrate --force` | Copies configuration from phosphorflux, forcing the migration. |

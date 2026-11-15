@@ -19,7 +19,7 @@ The TUI's Templates feature supports save-as, load, export, import, and delete (
 You can override theme colors in the phosphorpulse config. Every value must be a `#RRGGBB` hex string.
 
 - `segments.<id>.fg` and `segments.<id>.bg` set a segment's colors on the main line.
-- `subagent.colors.<id>.fg` and `subagent.colors.<id>.bg` set colors on the subagent line. The subagent line does not inherit from `segments`, so set its colors here separately.
+- `subagent.colors.<id>.fg` and `subagent.colors.<id>.bg` set colors on the subagent line. The subagent line does not inherit from `segments`, so set its colors here separately. This only takes effect on Claude Code before 2.1.323.
 - `gauge.okColor`, `gauge.warnColor` and `gauge.hotColor` color the gauge segments: `limit5h`, `limit7d`, `limitModel`, `ctx`, `ctxGauge`, `cache`, and the subagent line's `ctx`. `ctxTokens` is not a gauge: it keeps its own colour (`segments.ctxTokens.fg`, default the theme's dim text) at every threshold.
 
 Precedence for the ok state: on the main line, a row's `color.fg` (when the row sets one) or `segments.<id>.fg` wins over `gauge.okColor`, and `gauge.okColor` wins over the theme. On the subagent line, `subagent.colors.ctx.fg` wins over `gauge.okColor`, and `gauge.okColor` wins over the theme. For the warn and hot states, `gauge.warnColor` or `gauge.hotColor` wins over the theme; segment and row colors never replace them. A `gauge.okColor`, `gauge.warnColor` or `gauge.hotColor` value that is not `#RRGGBB` fails config validation.

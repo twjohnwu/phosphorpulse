@@ -43,6 +43,8 @@
 }
 ```
 
+`subagentStatusLine` entry 僅適用 Claude Code 2.1.323 以前的版本。2.1.323 已移除 `subagentStatusLine` 設定，之後 subagent rows 會使用 Claude Code 的預設外觀。
+
 `refreshInterval: 1` 讓時間型 segments（pomodoro、時鐘、重置倒數）每秒跳動；單次 render 約占單核 0.7%。
 
 TUI 的 **Settings & Install** 畫面或首次執行的 setup wizard 可自動加入這些 entries。寫入前會顯示 diff、要求確認，並備份既有的 `settings.json`。
@@ -52,7 +54,7 @@ TUI 的 **Settings & Install** 畫面或首次執行的 setup wizard 可自動�
 | Command | 說明 |
 | --- | --- |
 | `phosphorpulse render` | 從 stdin 讀取 Claude Code statusline JSON，並輸出 rendered statusline。 |
-| `phosphorpulse render --subagent` | 為 subagent statusline 執行相同操作。 |
+| `phosphorpulse render --subagent` | 為 subagent statusline 執行相同操作。僅適用 Claude Code 2.1.323 以前的版本（2.1.323 已移除 `subagentStatusLine`）。 |
 | `phosphorpulse config` | 輸出 active configuration 及其 sources。 |
 | `phosphorpulse migrate` | 從 phosphorflux 複製 configuration。 |
 | `phosphorpulse migrate --force` | 從 phosphorflux 複製 configuration，並強制執行 migration。 |

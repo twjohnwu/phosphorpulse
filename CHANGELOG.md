@@ -3,6 +3,12 @@
 All notable changes to phosphorpulse are listed here, newest first.
 The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The TUI Subagent Line screen, the READMEs and the theme docs now note that the subagent line only works on Claude Code before 2.1.323, which removed the `subagentStatusLine` setting.
+
 ## [0.4.0] - 2026-10-30
 
 ### Added
