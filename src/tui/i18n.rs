@@ -148,6 +148,7 @@ message_table! {
     RowsSegmentsLayoutFixed => ("rowsSegments.layoutFixed", "fixed", "固定"),
     RowsSegmentsPomodoroValues => ("rowsSegments.pomodoroValues", "(work {work}min)", "(工作 {work}分)"),
     SubagentLineTitle => ("subagentLine.title", "Subagent Line", "子代理列"),
+    SubagentLineVersionNote => ("subagentLine.versionNote", "Only works on Claude Code before 2.1.323 — later versions removed subagentStatusLine.", "僅適用 Claude Code 2.1.323 以前的版本；之後的版本已移除 subagentStatusLine。"),
     CommonMoveModeSuffix => ("common.moveModeSuffix", "[move mode]", "[移動模式]"),
     HintsAddA => ("hints.addA", "[a add]", "[a 新增]"),
     HintsInsertI => ("hints.insertI", "[i insert]", "[i 插入]"),

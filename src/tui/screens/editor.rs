@@ -721,7 +721,13 @@ impl Screen for SubagentLineScreen {
             })
             .unwrap_or_default();
         f.render_widget(
-            Paragraph::new(horizontal_segments(&segments, s.selected(), self.move_mode)),
+            Paragraph::new(vec![
+                horizontal_segments(&segments, s.selected(), self.move_mode),
+                Line::from(Span::styled(
+                    t(s.lang, &Key::SubagentLineVersionNote, &[]),
+                    Style::default().fg(crate::tui::screens::common::DIM),
+                )),
+            ]),
             a[1],
         );
         footer(
