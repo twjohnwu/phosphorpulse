@@ -723,9 +723,10 @@ impl Screen for SubagentLineScreen {
         f.render_widget(
             Paragraph::new(vec![
                 horizontal_segments(&segments, s.selected(), self.move_mode),
+                Line::from(""),
                 Line::from(Span::styled(
                     t(s.lang, &Key::SubagentLineVersionNote, &[]),
-                    Style::default().fg(crate::tui::screens::common::DIM),
+                    Style::default().fg(crate::tui::screens::common::ERROR),
                 )),
             ]),
             a[1],
